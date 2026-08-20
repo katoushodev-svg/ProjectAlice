@@ -1,0 +1,28 @@
+// Local.xcconfig.example
+//
+// Template for developer-local build settings. DO NOT commit a real Local.xcconfig.
+// Purpose:
+// - Provide a safe example showing how to supply ALICE_API_BASE_URL to the app
+// - Demonstrate preserving Flutter's generated DART_DEFINES via $(inherited)
+//
+// Usage (developer machine):
+// 1. Copy this file to Local.xcconfig in the same directory.
+//    Example: cp Local.xcconfig.example Local.xcconfig
+// 2. Base64-encode the full ALICE_API_BASE_URL=<URL> string.
+// 3. Replace the placeholder in DART_DEFINES with the Base64 result.
+// 4. Ensure Local.xcconfig is ignored by git.
+// 5. Build/run using the Debug configuration.
+//
+// Notes / safety:
+// - The value for ALICE_API_BASE_URL should be an absolute URL (scheme://host[:port]).
+// - For local HTTP development use only: http://127.0.0.1:PORT
+// - For remote development / staging use HTTPS (https://example.com).
+// - Do NOT include user credentials, tokens, production secrets, or real network addresses.
+// - Do not include Generated.xcconfig here; Debug.xcconfig already loads it.
+// - Keep the DART_DEFINES value as a comma-delimited list of Base64-encoded define values.
+// - This file intentionally contains only placeholders and instructions.
+
+// Keep Flutter's generated DART_DEFINES by including $(inherited).
+// The example format uses a Base64-encoded define value, not a raw URL.
+// For local use, create a Local.xcconfig with the same pattern.
+DART_DEFINES=$(inherited),<BASE64_ENCODED_ALICE_API_BASE_URL_DEFINE>
