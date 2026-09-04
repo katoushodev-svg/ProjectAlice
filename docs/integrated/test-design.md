@@ -6,8 +6,8 @@
 |---|---|
 | Document | `test-design.md` |
 | Version | 14 |
-| Status | Phase 1–2 Approved |
-| Target | Phase 1–2 Test Detailed Design / Phase 3〜4 Test Architecture |
+| Status | Phase 1–4 Design Approved / Phase 4 Registry Integrated |
+| Target | Phase 1–4 Test Detailed Design / Cross-Phase Safety & E2E Gate |
 | Last Updated | 2026-09-02 JST |
 
 本ドキュメントは、Project AliceにおけるSoftware Test、Integration Test、External Service Smoke Test、Security ScanおよびAI Evaluationの実行構成を定義する。
@@ -1594,3 +1594,76 @@ P2-SEC-TC-006、007、012、014、016、017はHappy Pathだけで完了扱いに
 各CaseはiOS PresentationとPlatform-neutral Application Stateを同じFixtureで検証する。Desktop版追加時はLayout Adapter固有Testを追加するが、API、State、Concurrency、ConfirmationおよびPrivacy ContractをForkしない。
 
 P2-FUI-TC-005、006、010、012はHappy Pathだけで完了扱いにせず、Timeout、Network切断、Process / Application再開、期限切れ、Version競合、PartialおよびUnknownを決定的に検証する。Golden / Snapshot、Failure Message、Analytics、Crash ArtifactおよびTest ReportへMemory本文、Passphrase、Token、内部Scoreまたは削除済みContentを残さない。
+
+---
+
+## 46. Phase 4 Formal Test Registry — 2026-09-04
+
+**Status:** Accepted / Integrated
+
+Source Decisions:
+
+- AGENT4-105 State Machine
+- AGENT4-106 Permission / Approval / Risk
+- AGENT4-107 PC / Browser / Application Safety
+- AGENT4-108 Prompt Injection / Adversarial
+- AGENT4-109 Crash / Recovery / Unknown Outcome
+- AGENT4-110 Voice / Ambient / Safety
+- AGENT4-111 Cross-Phase E2E / Visual Drift Gate
+
+Required registries / gates:
+
+- AgentExecution normal and invalid transitions
+- Lifecycle Status ≠ Outcome
+- Capability × Operation × Scope × Device × Permission Lifetime × Risk × Approval matrix
+- Filesystem traversal / symlink / scope / destructive tests
+- Structured Terminal / privilege tests
+- Browser `READ ≠ INTERACT ≠ COMMIT`, `FORM INPUT ≠ SUBMIT`, `DOWNLOAD ≠ EXECUTE`, `LOGIN ≠ PERMISSION`, Origin isolation
+- Application focus / stale element / clipboard / drag-drop / sensitive UI
+- External-content prompt injection with execution-boundary rejection
+- Crash-point injection before / after dispatch and no blind retry
+- stale fence / replay / stale executor rejection
+- voice ambiguity / ambient audio / voice ≠ identity / screen escalation
+- Emergency Stop semantics
+- Golden / visual review: Ambient, Conversation, Agent Running, Approval, Unknown Outcome, Emergency Stop, Desktop Spatial
+- Cross-phase E2E: filesystem → test → fix → test → push; push is a separate action and requires applicable approval
+
+Acceptance: Critical Open = 0, High Open = 0, Blocking Medium Open = 0.
+
+P4-NFR-021 version pinning remains an implementation-readiness gate and does not weaken the accepted design registry.
+
+
+---
+
+## 47. UI-VIS-SOT-001 Visual Regression / Golden Registry — 2026-09-05
+
+**Status:** Accepted / Integrated  
+**Gate:** Visual Drift is blocking.
+
+Golden / visual states:
+
+| ID | Reference State |
+|---|---|
+| GV-01 | Mobile Empty / Idle |
+| GV-02 | Mobile Conversation / History |
+| GV-03 | Mobile Thinking / Streaming |
+| GV-04 | Mobile Keyboard Open / Core Reduced |
+| GV-05 | Mobile Reduce Motion / Large Text |
+| GV-06 | Ambient / Listening |
+| GV-07 | Agent Running — Minimal |
+| GV-08 | Approval Required / Permission Required |
+| GV-09 | Unknown Outcome / Verifying |
+| GV-10 | Emergency Stop |
+| GV-11 | Desktop Single-display Alice-centered Conversation |
+| GV-12 | Dual-display role composition and migration |
+| GV-13 | Triple-display role composition, disconnect migration and Reduce Motion |
+
+Visual Regression Gate:
+- compare against UI-BL-001 and UI-VIS-SOT-001, not memory;
+- Alice Core / Conversation hierarchy must remain intact;
+- default permanent capability navigation is prohibited;
+- current Core renderer must remain replaceable;
+- color, glow, motion, typography, panel density and responsive behavior must remain inside accepted visual contracts;
+- Golden images must never be regenerated merely to make a failing test pass;
+- display disconnect/reconnect must preserve semantic state and must not invent new execution authority;
+- Critical / High / Blocking Medium visual findings must equal 0 before visual approval.

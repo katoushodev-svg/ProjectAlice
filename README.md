@@ -1,97 +1,32 @@
-Aliceとは
+# Project Alice — Phase 3 Design Package
 
-Aliceは、私専属のパーソナルAIアシスタントです。
+Status: **COMPLETE / APPROVED**  
+Phase: **Phase 3 — Tools / External Services**  
+Final Design Review: **PASS**  
+Cross-Design Consistency Review: **PASS**
 
-Aliceの目的は、私の日常生活、仕事、学習、創作活動を継続的に支援し、私自身の可能性を広げることです。
+このパッケージは、Phase 3で確定・承認されたArchitecture-level Designをまとめた正式成果物です。
 
-Aliceは単なる質問回答AIではありません。
+## Included files
 
-私の価値観、好み、行動パターン、技術経験、過去の判断を理解し、状況に応じた最適なサポートを提供する存在です。
+1. `phase3-tool-design.md`
+2. `phase3-api-design.md`
+3. `phase3-database-design.md`
+4. `phase3-security-design.md`
+5. `phase3-ai-design.md`
+6. `phase3-frontend-design.md`
+7. `phase3-test-design.md`
+8. `phase3-final-design-review.md`
 
-⸻
+## Core principles
 
-Aliceの役割
-
-Aliceは複数の役割を持ちます。
-
-1. パーソナルアシスタント
-
-日常生活における意思決定や情報整理を支援します。
-
-例：
-
-* 登録した店舗情報や現在状況をもとに、最適な飲食店を提案する
-* 予定や興味に合わせた行動を提案する
-* 必要な情報を整理して提示する
-* 日常の判断をサポートする
-
-Aliceは単に情報を検索するのではなく、
-「私にとって何が最適か」を考えて提案します。
-
-⸻
-
-2. 開発パートナー（バーチャルCTO / テックリード）
-
-ソフトウェア開発において、技術的な意思決定を支援します。
-
-担当領域：
-
-* システム設計
-* アーキテクチャ検討
-* 技術選定
-* コードレビュー
-* 要件整理
-* 学習支援
-
-Aliceは短期的に動作する実装だけではなく、
-
-* 保守性
-* 拡張性
-* セキュリティ
-* 運用コスト
-* 将来的な成長性
-
-を考慮して助言します。
-
-⸻
-
-3. 生活操作アシスタント
-
-PCやデバイスと連携し、日常操作を支援します。
-
-例：
-
-* 音声によるアプリ操作
-* YouTubeの再生・停止
-* 作業環境の操作
-* 情報取得や整理
-
-目標は、自然な会話によってコンピューターを操作できる環境を作ることです。
-
-⸻
-
-4. パーソナルナレッジ管理
-
-私に関する情報や経験を蓄積し、長期的な知識基盤として成長します。
-
-管理対象：
-
-* 技術経験
-* 学習履歴
-* 開発プロジェクト
-* 判断基準
-* 趣味や好み
-* 過去の意思決定
-
-蓄積した情報を活用し、時間とともに私への理解を深めます。
-
-⸻
-
-Aliceの最終的な姿
-
-Aliceは「便利なAIツール」ではなく、
-私専用に成長するデジタルパートナーを目指します。
-
-仕事では優秀なテックリードとして、
-日常では有能なパーソナルアシスタントとして、
-常に私の目的達成を支援する存在になります。
+- Conversation remains the primary interaction surface.
+- AI Tool Call is a proposal, not execution authority.
+- Tool / Connector / Operation responsibilities are separated.
+- Credential / Alice Permission / Approval are independent.
+- External writes use durable execution intent, fencing, idempotency and reconciliation.
+- `UNKNOWN` is never guessed as success or failure.
+- External dynamic state is not Personal Memory by default.
+- External content is untrusted data.
+- Apple Calendar is the initial priority connector and uses a trusted Apple Runtime boundary.
+- Phase 4 responsibilities such as generic PC control, shell execution and browser automation remain out of scope.

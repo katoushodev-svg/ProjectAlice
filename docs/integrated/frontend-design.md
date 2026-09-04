@@ -780,3 +780,42 @@ Statusを色だけで表現せず、Accessible Name、Dynamic Textおよび44 ×
 | Result | FUI2-001〜FUI2-030 Accepted |
 | Review Finding | P2-FINAL-CR-001 Resolved |
 | Final Review | `phase2-detailed-design-final-review.md` Version 2 — Passed |
+
+---
+
+## Phase 4 Cross-Phase Frontend Architecture Integration — 2026-09-04
+
+**Status:** Accepted / Integrated
+**Source:** UI-XP-001, AGENT4-098-R〜104-R, P4-FR-109〜121
+
+- Frontend owns render, user input collection, approval decision submission, permission action, cancel/stop request, and detail request.
+- Frontend does not decide Risk, Permission, Execution Authority, or Success-from-timeout.
+- Primary experience: Ambient / Voice and Conversation.
+- Contextual presentation: Tool Result, Agent Status, Approval, Permission Request, Unknown Outcome.
+- Subordinate presentation: Memory Management, Permission Management, Execution Detail, Trusted Devices, Safety / Settings, Audit / History.
+- `AliceCoreState` is mapped through a Presentation Contract rather than exposing Domain enums directly.
+- Capability growth must not force permanent top-level navigation growth.
+- Phase 1 does not pre-implement future routes / packages / interfaces solely for Phase 4.
+
+
+---
+
+## Visual Source-of-Truth Integration Resolution — 2026-09-05
+
+**Status:** Accepted / Integrated  
+**Source:** UI-BL-001 / UI-VIS-SOT-001 / accepted Visual Detailed Design / CVD / Golden View decisions
+
+Normative visual hierarchy for all implementation and review work:
+
+`UI-BL-001 → UI-VIS-SOT-001 → accepted CVD / Golden View → UI-XP-001 / UI-012 → Phase-specific UI → Component / FIP → Implementation → Generated Mockup`
+
+Rules:
+- Conversation + Alice Core remain the primary Alice experience.
+- Alice Core represents Presence, never execution authority.
+- `AliceCoreState → Presentation Contract → AliceCoreRenderer → Visual Expression`.
+- Renderer technology remains Presentation-only and replaceable.
+- Application / Domain logic must not depend on particle, shader, asset, geometry, animation-controller, or canvas implementation details.
+- Phase 1 does not pre-implement speculative Phase 2–4 renderer frameworks. Replaceability is achieved through Presentation isolation and dependency direction within the implemented scope.
+- Capability Growth must not become permanent Dashboard / Primary Navigation Growth.
+- Generated mockups never override the accepted visual Source of Truth.
+- Any visual mismatch is Visual Drift and blocks UI approval until corrected or explicitly superseded by a new user-approved baseline decision.
