@@ -5,9 +5,9 @@
 | Item | Value |
 |---|---|
 | Document | `frontend-implementation-plan.md` |
-| Status | Approved — Phase 0 Planning Mode |
+| Status | Approved — Implementation Authorized |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-19 JST |
+| Last Updated | 2026-09-05 JST |
 
 本ドキュメントは、承認済みのPhase 1 Frontend Detailed DesignをAI Coding Assistantが実装へ投入するための作業順序、変更単位、入力文書、成果物およびGateを定義する。
 
@@ -19,10 +19,12 @@ Architecture、API、UIまたはSecurityの新しいDecisionを本ドキュメ�
 |---|---|---|
 | FIP-001 | Completed / Approved | Completed |
 | FIP-002 | Completed / Approved | Completed |
-| FIP-003〜FIP-012 | Draft documents to be created sequentially | Not Started |
-| FIP-013〜FIP-014 | Deferred until Phase 1 implementation resumes | Not Started |
+| FIP-003〜FIP-012 | Approved / Implementation Ready | Not Started |
+| FIP-013〜FIP-014 | Deferred until Phase 1 implementation progresses | Not Started |
 
 FIP-002は2026-08-19 JSTに、Configuration Test、Static Check、Xcode Debug Configuration経由の起動、およびiPhone 16 Pro Simulatorでの`Alice`表示確認をもって完了した。
+
+Phase 2〜4 Formal Design、Cross-Phase Review、FIP-003〜012 Cross-Phase Re-review、Phase 0 Final Design ReviewおよびCanonical Git Repository同期は完了している。次の実装対象はFIP-003 Domain Foundationである。
 
 ---
 
@@ -37,19 +39,11 @@ Implementation Preparationの目的は、設計書を単に一覧化すること
 - Backend未完成でもFakeを使ってFrontend開発を進められるようにする
 - 実装時にAIへArchitecture Decisionを委ねない
 
-### 2.1 Phase 0 Planning Mode
+### 2.1 Phase 0 Planning Mode（Completed）
 
-FIP-002完了後はPhase 1 Frontendのソースコード実装を停止する。FIP-003〜FIP-012では実装計画ドキュメントだけを順番に作成し、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。検証コードもユーザーの明示的な許可なしに作成しない。
+FIP-002完了後はPhase 1 Frontendのソースコード実装を停止し、FIP-003〜FIP-012では実装計画ドキュメントだけを順番に作成した。作成時点では各文書をDraftとして扱い、Phase 2〜4設計後のCross-Phase Re-reviewを必須とした。
 
-FIP-003〜FIP-012の各文書は、作成時点では次の状態とする。
-
-```text
-Status: Draft
-Implementation: Not Started
-Review Required After Phase 2-4 Design: Yes
-```
-
-これらはPhase 1 Frontendの完成形と実装順序を明確にするためのDraftであり、Phase 2〜4の具体仕様を先取りして確定するものではない。
+このPlanning Modeは2026-09-05 JST時点で完了している。FIP-003〜FIP-012はCross-Phase Re-reviewを通過し、すべて`Approved / Implementation Ready`へ昇格済みである。
 
 ---
 
@@ -140,20 +134,20 @@ frontend/
 |---:|---|---|---|
 | 1 | FIP-001 Project Scaffold | Flutter iOS Project、Version固定、Analyzer、Portrait / iOS 15設定 | Completed / Approved |
 | 2 | FIP-002 App Configuration | `ALICE_API_BASE_URL`、Development ATS、Client Lifecycle | Completed / Approved |
-| 3 | FIP-003 Domain Foundation | Conversation、Message、Role、OutgoingMessage、Domain Error | Draft Document Only |
-| 4 | FIP-004 API Contract Foundation | DTO、Problem Details、Mapping、SSE Parser、Fixture | Draft Document Only |
-| 5 | FIP-005 Application State | Gateway Port、Screen State、Reducer、Retry / Pagination Rule | Draft Document Only |
-| 6 | FIP-006 Visual Foundation | Theme Token、Typography、Spacing、Alice Core Asset / Painter | Draft Document Only |
-| 7 | FIP-007 Screen Shell | Header、Core Region、Message Viewport、Composer | Draft Document Only |
-| 8 | FIP-008 Initial History | Initial Load、Empty、History、Initial Failure | Draft Document Only |
-| 9 | FIP-009 Send and Streaming | Validation、UUID Lifecycle、POST、SSE、Canonical Completion | Draft Document Only |
-| 10 | FIP-010 Retry and Failure | Result Unknown、Same-key Retry、Partial Failure、Replay | Draft Document Only |
-| 11 | FIP-011 Pagination and Scroll | Older Page、Anchor、Follow-latest、Keyboard | Draft Document Only |
-| 12 | FIP-012 Accessibility and Visual Gate | Semantics、Dynamic Type、Reduce Motion、Golden | Draft Document Only |
+| 3 | FIP-003 Domain Foundation | Conversation、Message、Role、OutgoingMessage、Domain Error | Approved / Implementation Ready |
+| 4 | FIP-004 API Contract Foundation | DTO、Problem Details、Mapping、SSE Parser、Fixture | Approved / Implementation Ready |
+| 5 | FIP-005 Application State | Gateway Port、Screen State、Reducer、Retry / Pagination Rule | Approved / Implementation Ready |
+| 6 | FIP-006 Visual Foundation | Theme Token、Typography、Spacing、Alice Core Asset / Painter | Approved / Implementation Ready |
+| 7 | FIP-007 Screen Shell | Header、Core Region、Message Viewport、Composer | Approved / Implementation Ready |
+| 8 | FIP-008 Initial History | Initial Load、Empty、History、Initial Failure | Approved / Implementation Ready |
+| 9 | FIP-009 Send and Streaming | Validation、UUID Lifecycle、POST、SSE、Canonical Completion | Approved / Implementation Ready |
+| 10 | FIP-010 Retry and Failure | Result Unknown、Same-key Retry、Partial Failure、Replay | Approved / Implementation Ready |
+| 11 | FIP-011 Pagination and Scroll | Older Page、Anchor、Follow-latest、Keyboard | Approved / Implementation Ready |
+| 12 | FIP-012 Accessibility and Visual Gate | Semantics、Dynamic Type、Reduce Motion、Golden | Approved / Implementation Ready |
 | 13 | FIP-013 Local Integration | Flutter → Local Backend → Fake AI → DynamoDB Local | Deferred |
 | 14 | FIP-014 Implementation Review | Scope、Dependency、Security、Test、Design Drift Review | Deferred |
 
-現在はFIP-003〜FIP-012をドキュメントとしてのみ作成する。FIP-012のDraft完成後はPhase 1 Frontend作業を停止し、Phase 2、Phase 3、Phase 4の設計およびPhase 1〜4横断レビューへ移る。Phase 0 Final Design Review完了後、FIP-003から実装を再開する。
+FIP-003〜FIP-012の計画作成、Phase 2〜4設計、Cross-Phase Review、再レビュー、Phase 0 Final Design ReviewおよびRepository Sync Gateは完了した。実装はFIP-003から依存順に再開する。
 
 ### 6.1 Required Contents of Each FIP Draft
 
@@ -180,14 +174,16 @@ Personal Memory、Tool Calling、Agent、Voice、Permission / Approvalおよび�
 
 ```mermaid
 flowchart TD
-    A["FIP-001〜002 Completed"] --> B["FIP-003〜012 Draft作成"]
-    B --> C["Phase 2〜4 Design"]
-    C --> D["Cross-phase Review"]
-    D --> E["Phase 0 Final Review"]
-    E --> F["FIP-003から実装再開"]
+    A["FIP-001〜002 Completed"] --> B["FIP-003〜012 Plans Completed"]
+    B --> C["Phase 2〜4 Design Completed"]
+    C --> D["Cross-phase Review PASS"]
+    D --> E["FIP Re-review PASS"]
+    E --> F["Phase 0 Final Review PASS"]
+    F --> G["Repository Sync Gate CLOSED"]
+    G --> H["FIP-003 Implementation"]
 ```
 
-FIP-003〜FIP-012は、Phase 2〜4設計後にArchitecture、Memory、Tool Calling、Agent / Voice、Security / Permission、API、State Managementおよび拡張性の観点で再レビューする。必要な修正後、`Draft → Cross-phase Review → Approved → Implementation Ready`の順に昇格させる。
+FIP-003〜FIP-012はPhase 2〜4設計後にArchitecture、Memory、Tool Calling、Agent / Voice、Security / Permission、API、State Managementおよび拡張性の観点で再レビュー済みであり、`Approved / Implementation Ready`である。
 
 ---
 
@@ -204,7 +200,7 @@ FIP-003〜FIP-012は、Phase 2〜4設計後にArchitecture、Memory、Tool Calli
 
 Testだけを先に大量作成せず、実装Sliceと同じBehavior単位で追加する。Golden更新はVisual変更としてReviewし、失敗を消す目的で無条件に再生成しない。
 
-このSectionはPhase 0 Final Design Review後にFIP-003から実装を再開した時点で適用する。Draft作成期間中にはTest Codeを作成しない。
+このSectionはPhase 0 Final Design Review後にFIP-003から実装を再開した時点で適用する。
 
 ---
 
@@ -266,7 +262,7 @@ Frontend実装開始前に次を満たす。
 - [x] `security-design.md` Approved
 - [x] `test-design.md` Approved
 - [x] `alice_core_base.png`生成・検証済み
-- [ ] 実際のRepositoryへ最新版Documentを反映済み
+- [x] 実際のRepositoryへ最新版Documentを反映済み
 - [x] Flutter `3.47.0`とDart `3.13.0`をLocalで確認済み
 - [x] Flutter導入後にXcode、Swift Package Manager、iOS Simulatorを最終確認済み
 - [x] iOS Simulator Runtime `iOS 18.4` / Device Model `iPhone 16 Pro`を記録済み
@@ -275,14 +271,14 @@ Frontend実装開始前に次を満たす。
 - [x] iOS Bundle Identifier `com.projectalice.assistant`を確定済み
 - [x] Phase 1はSimulatorを標準とし、実機利用開始時にDevelopment Teamを設定する方針を確定済み
 - [x] FIP-001用Task Promptをレビュー済み
-- [ ] FIP-003〜FIP-012 Draft作成済み
-- [ ] Phase 2〜4設計完了
-- [ ] Phase 1〜4横断レビュー完了
-- [ ] FIP-003〜FIP-012再レビュー・必要修正完了
-- [ ] Phase 0 Final Design Review完了
-- [ ] FIP-003がApproved / Implementation Ready
+- [x] FIP-003〜FIP-012 Draft作成済み
+- [x] Phase 2〜4設計完了
+- [x] Phase 1〜4横断レビュー完了
+- [x] FIP-003〜FIP-012再レビュー・必要修正完了
+- [x] Phase 0 Final Design Review完了
+- [x] FIP-003がApproved / Implementation Ready
 
-上記のPhase 0関連項目が未完了の状態でFIP-003以降を実装しない。
+**Definition of Ready: SATISFIED — FIP-003 Implementation Authorized**
 
 ---
 
@@ -307,7 +303,7 @@ Project IdentityとSigning方針は2026-08-17 JSTにユーザー承認済みで�
 | Host | macOS `15.2` / Apple Silicon `arm64` | Available |
 | Flutter | `3.47.0` Stable、Framework `4cf2416426` | Ready |
 | Dart | `3.13.0` Stable | Ready |
-| DevTools | `2.60.0` | Ready |
+| DevTools | `2.60.0` Stable | Ready |
 | Xcode | `16.3`（Build `16E140`） | Ready |
 | iOS Simulator Runtime | `iOS 18.4` | Available |
 | Default Simulator | `iPhone 16 Pro` | Fixed for FIP-001 / E2E |
@@ -399,7 +395,7 @@ FIP-002は2026-08-19 JSTに完了した。
 
 FIP-002 Review Result: **APPROVED**
 
-次の作業はFIP-003の実装ではなく、FIP-003 Domain FoundationのDraft実装計画書作成とする。
+次の作業はFIP-003 Domain Foundationの実装とする。
 
 ---
 
@@ -418,4 +414,28 @@ FIP-002 Review Result: **APPROVED**
 - Repositoryへ`alice_core_base.png`が正しいPathで配置されている
 - Phase 1 Scope外機能を実装Taskへ含めていない
 
-FIP-012 Draft完成後はPhase 1 Frontend作業を停止し、Phase 2〜4設計へ移る。Phase 0 Final Design Review完了後にFIP-003から実装を再開する。
+**Phase 0 Frontend Implementation Planning: COMPLETED**
+
+Phase 2〜4設計、Cross-Phase Review、FIP-003〜012 Re-review、Phase 0 Final Design ReviewおよびCanonical Git Repository同期は完了済みである。FIP-003から実装を再開する。
+
+---
+
+## 15. Phase 0 Final Gate Resolution
+
+**Resolved:** 2026-09-05 JST  
+**P0-FINAL-GATE-001:** CLOSED  
+**Repository Sync:** VERIFIED  
+**Design Drift introduced by sync:** NONE  
+**FIP-003:** Approved / Implementation Ready  
+**Implementation Authorization:** GRANTED
+
+Repository Sync GateのRequired Resolutionを満たしたため、Phase 0 Final Design ReviewのImplementation Authorization Ruleに従い、Phase 0 Final GateをPASSへ昇格する。
+
+```text
+Phase 1〜4 Formal Design: COMPLETE
+Cross-Phase Review: PASS
+FIP-003〜012 Re-review: PASS / Approved / Implementation Ready
+Phase 0 Final Design Review: PASS — Implementation Authorized
+Repository Sync Gate: CLOSED
+Next Implementation Slice: FIP-003 Domain Foundation
+```
