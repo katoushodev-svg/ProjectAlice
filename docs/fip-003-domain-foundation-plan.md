@@ -6,15 +6,15 @@
 |---|---|
 | Document | `fip-003-domain-foundation-plan.md` |
 | FIP | FIP-003 Domain Foundation |
-| Status | Draft |
+| Status | Approved / Implementation Ready |
 | Implementation | Not Started |
-| Review Required After Phase 2-4 Design | Yes |
+| Review Required After Phase 2-4 Design | Completed |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-19 JST |
+| Last Updated | 2026-09-06 JST |
 
-本ドキュメントは、Phase 1 FrontendのDomain Foundationを後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度まで具体化するDraft実装計画である。
+本ドキュメントは、Phase 1 FrontendのDomain FoundationをGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度まで具体化した、承認済みの実装計画である。
 
-本Draft作成時点ではソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4の設計結果を反映したCross-phase ReviewおよびPhase 0 Final Design Reviewが完了するまで、FIP-003を実装してはならない。
+Phase 2〜4の設計結果を反映したCross-phase Review、FIP-003〜FIP-012 Cross-Phase Re-reviewおよびPhase 0 Final Design Reviewは完了している。FIP-001とFIP-002もCompleted / Approvedであり、FIP-003のImplementationは開始可能である。
 
 ---
 
@@ -78,10 +78,10 @@ FIP-003は「データを保持するだけのClassを作る作業」ではな�
 - FIP-003〜FIP-012のDraft作成が完了している
 - Phase 2〜4 Designが完了している
 - Phase 1〜4 Cross-phase Reviewが完了している
-- 本Draftが必要に応じて修正され、`Approved / Implementation Ready`へ昇格している
+- 本計画が必要に応じて修正され、`Approved / Implementation Ready`へ昇格している
 - Phase 0 Final Design Reviewが完了している
 
-現時点では前半2項目だけが完了しているため、Implementationは開始しない。
+上記Preconditionsはすべて満たされている。Definition of Readyは`SATISFIED — FIP-003 Implementation Authorized`であり、FIP-003のImplementationを開始できる。
 
 ---
 
@@ -95,7 +95,7 @@ FIP-003は「データを保持するだけのClassを作る作業」ではな�
 | `api-design.md` | Message / Conversation Schema、Content Rule、Idempotency Contract |
 | `security-design.md` | Conversation Content、IdentifierおよびLogの取扱い |
 | `test-design.md` | Domain Unit Test原則と品質Gate |
-| `frontend-implementation-plan.md` | FIP順序、Draft-only方針、AI Coding Assistant Rule |
+| `frontend-implementation-plan.md` | FIP順序、Implementation Gate、AI Coding Assistant Rule |
 | `decisions.md` | Accepted Architecture Decision |
 
 矛盾が見つかった場合、本FIP内で推測して解消しない。該当するSource of Truthを先に修正する。
@@ -369,7 +369,7 @@ frontend/
 
 Phase 0 Final Design Review後、次の順序で実装する。
 
-1. Source of Truthが本Draft承認時点から変更されていないか確認する
+1. Source of Truthが本計画承認時点から変更されていないか確認する
 2. `conversation/domain/`と対応Test Pathへ必要なFileだけを追加する
 3. `MessageRole`を`user` / `assistant`の2値で実装する
 4. `Conversation`と`Message`を不変なPlain Dart Modelとして実装する
@@ -434,7 +434,7 @@ flutter test test/conversation/domain
 flutter test
 ```
 
-これらはImplementation再開後に実行するCommandであり、Draft作成時点では実行しない。
+これらはFIP-003 Implementationで実行する必須Commandである。
 
 ---
 
@@ -460,14 +460,14 @@ flutter test
 
 FIP-003 Implementationは、次をすべて満たした時点で完了とする。
 
-1. 本DraftがCross-phase Review後に`Approved / Implementation Ready`へ昇格している
+1. 本計画がCross-phase Review後に`Approved / Implementation Ready`へ昇格している
 2. Acceptance Criteriaをすべて満たしている
 3. Code ReviewでLayer Boundary、Immutability、SecurityおよびScopeを確認済みである
 4. Planned Commandsがすべて成功している
 5. 設計との差分がない、または差分が先にDesign / ADRへ反映されている
 6. FIP-004が利用できる安定したDomain Boundaryになっている
 
-Draft作成の完了は、FIP-003 Implementationの完了を意味しない。
+計画の承認は、FIP-003 Implementationの完了を意味しない。
 
 ---
 
@@ -517,7 +517,7 @@ Phase 2〜4設計後、少なくとも次を再レビューする。
 - Audio、Screenshot、File Content等のSensitive Dataを安全に分離できるか
 - Desktop UI追加がDomain Modelへ影響しないか
 
-これらの具体仕様は本Draftでは決定しない。必要な変更がArchitecture Decisionに該当する場合は、実装より先にDesign / ADRを更新する。
+これらの具体仕様は本計画では決定しない。必要な変更がArchitecture Decisionに該当する場合は、実装より先にDesign / ADRを更新する。
 
 ---
 
@@ -536,7 +536,7 @@ Phase 2〜4設計後、少なくとも次を再レビューする。
 
 ---
 
-## 21. Draft Review Checklist
+## 21. Approved Plan Review Checklist
 
 ### Scope and Architecture
 
@@ -557,7 +557,7 @@ Phase 2〜4設計後、少なくとも次を再レビューする。
 
 - [x] Phase 2〜4の具体仕様を確定していない
 - [x] Cross-phase Review項目を記録している
-- [x] 実装開始条件とDraft-only方針を明示している
+- [x] 実装開始条件とImplementation Gateを明示している
 
 ---
 
@@ -566,9 +566,11 @@ Phase 2〜4設計後、少なくとも次を再レビューする。
 現在の状態:
 
 ```text
-FIP-003 Document: Draft Created
+FIP-003 Document: Approved / Implementation Ready
 FIP-003 Implementation: Not Started
-Cross-phase Review: Required
+Cross-phase Review: PASS / Completed
+Phase 0 Final Design Review: PASS
+Implementation Authorization: GRANTED
 ```
 
-本Draftをユーザーが確認・承認した後、FIP-003のソースコード実装には進まず、FIP-004 API Contract FoundationのDraft実装計画書作成へ進む。
+次の実装対象はFIP-003 Domain Foundationである。GitHub Copilotの新しいAgent Sessionで`.github/prompts/fip-003.prompt.md`を明示的に呼び出し、本計画のScope、禁止事項、Test PlanおよびAcceptance Criteriaに従ってFIP-003だけを実装する。FIP-003のGateがPASSするまでFIP-004以降へ進まない。CommitおよびPushはユーザーの明示指示がある場合にのみ行う。
