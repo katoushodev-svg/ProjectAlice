@@ -4,11 +4,9 @@
 
 Project Aliceは、最初から万能なAIアシスタントを目指さない。
 
-小さな機能から段階的に成長させ、
-利用履歴やユーザー情報を蓄積することで、
-徐々にユーザー専用AIへ進化させる。
+小さな機能から段階的に成長させ、実際の利用を通じて得た情報を適切に蓄積・活用することで、徐々にユーザー専用AIへ進化させる。
 
-本ドキュメントでは、Aliceの開発フェーズと各段階の目標を定義する。
+本ドキュメントでは、Aliceの開発フェーズと各段階の目標をMVPレベルで定義する。各機能の詳細な要件、データ構造、権限モデル、実装方式は正式設計文書で定義する。
 
 ---
 
@@ -16,7 +14,7 @@ Project Aliceは、最初から万能なAIアシスタントを目指さない�
 
 ## 目的
 
-Aliceの方向性、設計思想、開発基盤を整える。
+Aliceの方向性、設計思想、正式な責務境界、開発基盤を整える。
 
 ## 成果物
 
@@ -25,62 +23,70 @@ Aliceの方向性、設計思想、開発基盤を整える。
 - 要件定義
 - 技術方針
 - リポジトリ構成
+- Phase間の整合性確認
+- Final Design Review
 
 ## 状態
 
-進行中
+**COMPLETE / Implementation Authorized**
+
+Phase 0の設計および最終レビューは完了しており、正式設計に基づく実装が承認されている。
 
 ---
 
-# Phase 1：AIチャット基盤
+# Phase 1：Conversation
 
 ## 目的
 
-Aliceと自然な会話ができる状態を作る。
+Aliceと自然で一貫した会話ができる基盤を作る。
 
 ## 機能
 
 - テキストチャット
-- AI API連携
-- 会話履歴保存
+- AI Provider連携
+- Conversation Historyの保存と参照
 - Alice人格設定
 - 基本的な質問応答
 
 ## 完成イメージ
 
-```
+```text
 ユーザー
- ↓
+  ↓
 Alice Interface
- ↓
-Alice Core
- ↓
+  ↓
+Conversation
+  ↓
 AI Provider
- ↓
+  ↓
 回答
 ```
+
+## Scope Boundary
+
+Conversation Historyは会話を継続するための履歴であり、Personal Memoryではない。会話履歴を自動的に長期記憶や権限情報として扱わない。
 
 ## 成功条件
 
 - Aliceとして一貫した回答ができる
-- 過去会話を参照できる
-- 会話履歴が保存される
+- 必要な過去会話を参照できる
+- Conversation Historyが保存される
 
 ---
 
-# Phase 2：Memory機能
+# Phase 2：Personal Memory
 
 ## 目的
 
-Aliceを「自分専用AI」に成長させる。
+ユーザーが管理できるPersonal Memoryを導入し、Aliceをユーザーに合わせて成長させる。
 
 ## 機能
 
 - ユーザープロフィール管理
-- 好み・価値観保存
-- 技術経験管理
-- プロジェクト情報管理
-- 過去会話検索
+- 好み、価値観、生活情報の管理
+- 技術経験や開発方針の管理
+- プロジェクト情報の管理
+- Memoryの保存、更新、参照、削除
 
 ## 保存対象例
 
@@ -101,121 +107,112 @@ Aliceを「自分専用AI」に成長させる。
 ### Project Memory
 
 - Project Alice
-- SixTONES Schedule Bot
-- その他開発案件
+- その他の開発案件
+
+## Scope Boundary
+
+- Conversation HistoryとPersonal Memoryは別の責務として扱う
+- MemoryはPermission、Approval、Execution Authorityの代わりにならない
+- MemoryをSystem InstructionやCredential Storeとして扱わない
 
 ## 成功条件
 
-Aliceが一般的な回答ではなく、
-ユーザーに合わせた回答を返せる。
+ユーザーが管理可能なMemoryに基づき、Aliceが一般的な回答ではなく、ユーザーに合わせた回答を返せる。
 
 ---
 
-# Phase 3：外部サービス連携
+# Phase 3：Tools / External Services
 
 ## 目的
 
-Aliceが情報取得・サービス操作できる状態にする。
+Aliceが外部サービスから情報を取得し、許可された範囲でサービスを利用できる状態にする。
 
 ## 機能候補
 
-- Google Calendar連携
+- Apple Calendar連携
 - 店舗情報検索
 - 天気情報取得
 - GitHub連携
-- AWS情報取得
+- Web検索
+- その他の外部サービス連携
 
-## 例
+初期Connectorは、ユーザー環境との親和性を踏まえて**Apple Calendarを優先**する。
 
-ユーザー:
+## 基本方針
 
-「今から飲みに行くならどこがいい？」
+外部サービスとの連携は、可能な限り限定的で明確なConnectorまたはAPIを利用する。
 
-Alice:
+Tool Selectionは、実行手段の選択であってApprovalではない。ツールが選択されたことだけを根拠に、許可が必要な操作を実行しない。
 
-- 現在位置
-- 時間
-- 好み
-- 過去利用履歴
+## 利用イメージ
 
-を考慮して提案する。
+```text
+ユーザーの依頼
+  ↓
+Conversation
+  ↓
+Tool Selection
+  ↓
+Connector / API
+  ↓
+取得結果または操作結果
+  ↓
+Aliceの回答
+```
 
----
+## 成功条件
 
-# Phase 4：開発支援AI
-
-## 目的
-
-Aliceをエンジニアリングパートナーにする。
-
-## 機能
-
-- コードレビュー
-- 設計レビュー
-- 要件レビュー
-- 技術選定支援
-- GitHub連携
-
-## 対象
-
-- 個人開発
-- 業務開発
-- 学習プロジェクト
+- Apple Calendarを初期優先Connectorとして利用できる
+- 外部サービス連携をConnector単位で安全に拡張できる
+- Tool SelectionとApprovalが分離されている
 
 ---
 
-# Phase 5：音声・デバイス操作
+# Phase 4：Agent / PC / Browser / Application / Voice
 
 ## 目的
 
-自然な会話によるコンピューター操作を実現する。
+AliceがユーザーのGoalを理解し、安全な権限境界の中で計画、実行、観測、評価を行える状態にする。PC、Browser、Application、Voiceを統合し、会話から現実の作業支援へつなげる。
 
 ## 機能候補
 
-- 音声入力
-- 音声回答
-- Mac操作
-- アプリ操作
-- YouTube操作
+- Goalの理解とPlanの作成
+- タスクの実行、結果の観測、評価、再計画
+- PC操作
+- Browser操作
+- Application操作
 - ファイル操作
+- 開発作業支援
+- 音声入力と音声回答
+- 状況に応じた提案や継続的な作業支援
 
-## 例
+## Agent Cycle
 
-ユーザー:
+```text
+Goal
+  ↓
+Plan
+  ↓
+Execute
+  ↓
+Observe
+  ↓
+Evaluate
+  └─ 必要に応じて再計画
+```
 
-「Alice、YouTube止めて」
+## Scope Boundary
 
-↓
+- GoalやAI ProposalはExecution Authorityではない
+- ユーザーが目的を示したことだけを、すべての操作への包括的な許可として扱わない
+- Memory、Permission、Approval、Risk、Execution Authorityを分離する
+- 操作の影響とリスクに応じて、必要な確認や承認を行う
 
-音声認識
+## 成功条件
 
-↓
-
-意図解析
-
-↓
-
-Mac操作
-
-↓
-
-YouTube停止
-
----
-
-# Phase 6：自律エージェント化
-
-## 目的
-
-Aliceがユーザーの目的達成を自律的に支援する。
-
-## 機能候補
-
-- タスク管理
-- 定期的な情報収集
-- リマインド
-- 作業補助
-- 状況に応じた提案
+- AliceがGoalに対して計画から評価までのAgent Cycleを実行できる
+- PC、Browser、Application、Voiceを一貫した体験として利用できる
+- 権限やリスクを伴う操作が正式なApprovalとExecution Authorityに基づいて実行される
 
 ---
 
@@ -225,8 +222,7 @@ Alice開発では以下を重視する。
 
 - 小さく作る
 - 実際に利用する
-- 利用結果をMemoryへ反映する
+- 利用結果を、ユーザーが管理可能な形で必要に応じてMemoryへ反映する
 - 必要な機能だけ拡張する
 
-Aliceは完成品ではなく、
-利用によって成長するシステムである。
+Aliceは一度に完成させる製品ではなく、正式な責務境界と安全性を維持しながら、利用を通じて段階的に成長するシステムである。
