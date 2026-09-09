@@ -6,16 +6,16 @@
 |---|---|
 | Document | `fip-011-pagination-and-scroll-plan.md` |
 | FIP | FIP-011 Pagination and Scroll |
-| Status | Draft |
-| Draft Planning | In Progress / User Review Pending |
+| Status | Approved / Implementation Ready |
+| Draft Planning | Completed |
 | Implementation | Not Started |
-| Review Required After Phase 2-4 Design | Yes |
+| Cross-phase Review | PASS |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-20 JST |
+| Last Updated | 2026-09-09 JST |
 
 本ドキュメントは、Phase 1 Conversation ScreenのOlder History Pagination、Scroll Anchor、Follow-latest、`最新へ`およびKeyboard Resize時の位置維持を、後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義するDraft実装計画である。
 
-本Draft作成時点では、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase ReviewおよびPhase 0 Final Design Reviewが完了するまで、FIP-011を実装してはならない。
+本Draft作成時点では、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase Reviewは完了済みである。実装は承認済みSource of Truthとプロジェクト全体のImplementation Gateに従う。
 
 ---
 
@@ -724,15 +724,28 @@ Scroll Framework上の制約が設計結果を変える場合、代替Packageを
 
 ---
 
-## 36. Current Decision and Next Step
+---
 
-現在の状態:
+## 36. Formal Cross-phase Review Resolution
 
 ```text
-FIP-011 Document: Draft Created
-FIP-011 Draft Planning: In Progress / User Review Pending
+FIP-011 Document: Approved / Implementation Ready
+FIP-011 Draft Planning: Completed
+FIP-011 Cross-phase Review: PASS
 FIP-011 Implementation: Not Started
-Cross-phase Review: Required
 ```
 
-本Draftをユーザーが確認・採用した後、Draft Planningを`Completed / User Confirmed`へ更新する。ソースコード実装には進まず、次にFIP-012 Verification and HardeningのDraft実装計画書作成へ進む。
+- Result: **PASS with terminology correction**
+- Critical Finding: 0
+- High Finding: 0
+- Blocking Medium Finding: 0
+- Low Finding: 0
+- Architecture redesign: None
+- Implementation Ready: YES
+- Implementation: Not Started
+
+The review confirms that this FIP remains within Phase 1 Conversation scope and does not introduce Phase 2 Personal Memory, Phase 3 Tool / External Service execution authority, or Phase 4 Agent / PC / Browser / Voice execution semantics. Existing cross-phase terminology corrections, where applicable, are documentation alignment only and do not alter architecture ownership.
+
+**Resolution: PASS — Approved / Implementation Ready.**
+
+Implementation may proceed in dependency order, subject to the project-level implementation gate and the approved Source of Truth.

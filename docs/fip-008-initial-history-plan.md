@@ -6,16 +6,16 @@
 |---|---|
 | Document | `fip-008-initial-history-plan.md` |
 | FIP | FIP-008 Initial History |
-| Status | Draft |
-| Draft Planning | In Progress / User Review Pending |
+| Status | Approved / Implementation Ready |
+| Draft Planning | Completed |
 | Implementation | Not Started |
-| Review Required After Phase 2-4 Design | Yes |
+| Cross-phase Review | PASS |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-20 JST |
+| Last Updated | 2026-09-09 JST |
 
 本ドキュメントは、Phase 1 Frontendの起動時Conversation / Message History取得、Initial Loading、Empty State、Canonical History表示およびInitial Load Failureを、後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義するDraft実装計画である。
 
-本Draft作成時点では、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase ReviewおよびPhase 0 Final Design Reviewが完了するまで、FIP-008を実装してはならない。
+本Draft作成時点では、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase Reviewは完了済みである。実装は承認済みSource of Truthとプロジェクト全体のImplementation Gateに従う。
 
 ---
 
@@ -911,15 +911,28 @@ Phase 2〜4 Design完了後に次を再確認する。
 
 ---
 
-## 34. Current Decision and Next Step
+---
 
-現在の状態:
+## 34. Formal Cross-phase Review Resolution
 
 ```text
-FIP-008 Document: Draft Created
-FIP-008 Draft Planning: Completed / User Confirmed
+FIP-008 Document: Approved / Implementation Ready
+FIP-008 Draft Planning: Completed
+FIP-008 Cross-phase Review: PASS
 FIP-008 Implementation: Not Started
-Cross-phase Review: Required
 ```
 
-本Draftはユーザー確認済みであり、Draft Planningを`Completed / User Confirmed`として記録する。ソースコード実装には進まず、次にFIP-009 Send and StreamingのDraft実装計画書作成へ進む。
+- Result: **PASS**
+- Critical Finding: 0
+- High Finding: 0
+- Blocking Medium Finding: 0
+- Low Finding: 0
+- Architecture redesign: None
+- Implementation Ready: YES
+- Implementation: Not Started
+
+The review confirms that this FIP remains within Phase 1 Conversation scope and does not introduce Phase 2 Personal Memory, Phase 3 Tool / External Service execution authority, or Phase 4 Agent / PC / Browser / Voice execution semantics. Existing cross-phase terminology corrections, where applicable, are documentation alignment only and do not alter architecture ownership.
+
+**Resolution: PASS — Approved / Implementation Ready.**
+
+Implementation may proceed in dependency order, subject to the project-level implementation gate and the approved Source of Truth.

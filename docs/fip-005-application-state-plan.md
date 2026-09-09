@@ -7,15 +7,17 @@
 | Document | `fip-005-application-state-plan.md` |
 | FIP | FIP-005 Application State |
 | Status | Draft |
-| Draft Planning | In Progress / User Review Pending |
+| Draft Planning | Completed / User Approved Revision |
 | Implementation | Not Started |
 | Review Required After Phase 2-4 Design | Yes |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-19 JST |
+| Last Updated | 2026-09-09 JST |
 
 本ドキュメントは、Phase 1 FrontendのApplication State、Gateway PortおよびPure Reducerを、後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義するDraft実装計画である。
 
 本Draft作成時点ではソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase ReviewおよびPhase 0 Final Design Reviewが完了するまで、FIP-005を実装してはならない。
+
+**Revision Note (2026-09-09):** User-approved design clarifications have been incorporated for State × Field invariants, Event payload contracts, reducer failure handling, protocol-violation boundaries, FIP-010 responsibility boundaries, history reconciliation, completed-message merge behavior, immutability, Request ID ownership, pagination cursor matching, and initial-load event boundaries. This revision remains a Draft and is not Implementation Ready until the required Cross-phase Review is completed.
 
 ---
 
@@ -157,7 +159,8 @@ Application StateをPlain Dartに保つことで、Widgetを起動せずに状�
 
 Rules:
 
-- `messages`は外部から変更できないListとして保持する
+- `messages`は防御的Copyを作成したうえで外部から変更できないUnmodifiable Listとして保持する
+- StateのConstructor / Factory / `copyWith`も内部Listへの可変参照を外部へ漏らさない
 - `hasMore=true`では`nextCursor`が非Nullかつ非Emptyである
 - `hasMore=false`では`nextCursor=null`である
 - Cursorを解析、生成、Trim、正規化またはLog出力しない
@@ -288,7 +291,8 @@ Statusを増やさず関連DataとInvariantで意味を補うことで、表示�
 ### 10.2 General Invariants
 
 - State ObjectはImmutableとする
-- `messages`は外部から変更できないListとして保持する
+- `messages`は防御的Copyを作成したうえで外部から変更できないUnmodifiable Listとして保持する
+- StateのConstructor / Factory / `copyWith`も内部Listへの可変参照を外部へ漏らさない
 - `messages`は古い順から新しい順とする
 - `conversation=null`は初期GET時点で未作成だったことを表す。初回Send完了後もAPIにConversation情報が含まれないため、ReducerがConversation IDやTimestampを推測生成してはならない
 - Canonical MessageとTemporary Textを同じListへ混在させない
@@ -300,15 +304,23 @@ Statusを増やさず関連DataとInvariantで意味を補うことで、表示�
 
 ### 10.3 Status-specific Invariants
 
-| Status | Required | Prohibited / Cleared |
-|---|---|---|
-| `initialLoading` | 初回取得、またはHistory Reconciliation。Reconciliation中は既存Canonical Messagesを保持可能 | Active Request。初回取得ではPending Send、Temporary Textもなし |
-| `ready` | Canonical Stateが利用可能 | Pending Send、Active Request、Temporary Text。ただしPagination Failureは保持可能 |
-| `loadingOlder` | `hasMore=true`、非Empty Cursor | Pending Send、Active Request、Temporary Text |
-| `sending` | Pending Sendあり | 新規の別Send、Older Page取得 |
-| `streaming` | Pending Send、Active Requestあり | 別Send、Older Page取得 |
-| `sendFailed` | Failureあり | Canonical化されていないPartial TextをMessage Listへ追加しない |
-| `initialLoadFailed` | Initial Load Failureあり | Pending Send、Active Request、Temporary Text |
+| Status | `conversation` | `messages` | `temporaryAssistantText` | `pagination` | `pendingSend` | `activeRequestId` | `failure` |
+|---|---|---|---|---|---|---|---|
+| `initialLoading` | 初回取得ではNull。Reconciliationでは既存値を保持可能 | 初回取得ではEmpty。Reconciliationでは既存Canonicalを保持可能 | Null | 常に保持 | 初回取得ではNull。Reconciliationでは保持可能 | Null | 初回取得ではNull。Reconciliationでは既存Failureを保持せず開始 |
+| `ready` | Nullまたは取得済みSnapshot | Canonical Listを保持。Empty可 | Null | 常に整合した値を保持 | Null | Null | Null、またはPagination Failureの情報のみ許可 |
+| `loadingOlder` | 現在のSnapshotを保持 | 既存Canonical Listを保持 | Null | `hasMore=true`かつ`nextCursor`非Null・非Empty | Null | Null | Null |
+| `sending` | 現在のSnapshotを保持 | 既存Canonical Listを保持 | Null | 現在値を保持 | 検証済み`OutgoingMessage`を1つ保持 | Null | Null |
+| `streaming` | 現在のSnapshotを保持 | 既存Canonical Listを保持 | 非Null。受信Deltaを順序どおり累積 | 現在値を保持 | 1つ保持 | 非Null | Null |
+| `sendFailed` | 現在のSnapshotを保持 | Canonical Historyのみ保持 | Partial Textがある場合のみ非Null | 現在値を保持 | Result Unknown等でSame-key Retryが必要な場合のみ保持 | Null | 非Null |
+| `initialLoadFailed` | Null | Empty Canonical List | Null | 初期値を保持 | Null | Null | Initial Load Failureを保持 |
+
+**Matrix interpretation rules:**
+
+- `conversation`と`messages`はCanonical Snapshotであり、Streaming途中のTemporary Textを含めない。
+- `initialLoading`は初回Initial LoadとHistory Reconciliationの両方に使用する。上表の「保持可能」はReconciliation時に限る。
+- `ready`で`failure`を保持できるのはPagination Failureに限る。Initial Load / Send Failureを残したまま`ready`へ遷移しない。
+- `sendFailed`の`pendingSend`保持可否は`failure.resultCertainty`とRecovery Policyから決まり、独立Booleanを追加しない。
+- `loadingOlder`では取得対象CursorをStateの`pagination.nextCursor`と一致させる。
 
 `sendFailed`では、Same-key Retryが安全な場合に限り`pendingSend`を保持する。既知のTerminal FailureでRetryせずHistory再取得だけを行う場合は、Recovery Policyに従って破棄できる。具体的なUser Action MappingはFIP-010で確定する。
 
@@ -392,47 +404,48 @@ Rules:
 
 ## 12. State Transition Events
 
-Pure Reducerへ入力するApplication Eventを次の責務単位で定義する。
+Pure Reducerへ入力するApplication Eventは、Reducerが必要とする最小のDomain/Application型だけをPayloadとして持つ。EventはI/Oを開始せず、HTTP Response、DTO、SSE Frame、Provider Event、Raw BodyまたはSDK Exceptionを保持しない。
 
-### 12.1 Initial Load
+### 12.1 Event Contract
 
-- `initialLoadStarted`
-- `initialLoadSucceeded`
-- `initialLoadFailed`
+| Event | Payload | Reducer Contract |
+|---|---|---|
+| `initialLoadStarted` | なし | `initialLoading`への遷移を開始する。初回LoadではCanonical Stateを初期化し、Reconciliationでは既存Canonical Messages / Pending Sendを保持する |
+| `initialLoadSucceeded` | `Conversation? conversation`, `MessagePage page` | ConversationとPageをCanonical Stateへ反映し`ready`へ遷移する。`conversation=null` + Empty Pageを正常に受理する |
+| `initialLoadFailed` | `ConversationFailure failure` | `initialLoadFailed`へ遷移する。初回Load失敗をEmpty Conversationとして扱わない |
+| `olderPageLoadStarted` | `String requestedCursor` | 現在の`pagination.nextCursor`と一致する場合だけ`loadingOlder`へ遷移する |
+| `olderPageLoadSucceeded` | `String requestedCursor`, `MessagePage page` | Requested Cursorが現在の取得対象と一致する場合だけMergeし、PageのCursor/hasMoreを反映して`ready`へ遷移する |
+| `olderPageLoadFailed` | `String requestedCursor`, `ConversationFailure failure` | Requested Cursorが一致する場合、既存MessagesとCursorを維持して`ready`へ戻す。Pagination Failure情報は`ready`に保持可能 |
+| `sendStarted` | `OutgoingMessage outgoingMessage` | 検証済みLogical Sendを1つ保持して`sending`へ遷移する。別Send中はInvalid Transition |
+| `streamStarted` | `String requestId` | Active Request IDを設定して`streaming`へ遷移する。Request IDをReducerで生成・正規化しない |
+| `assistantDeltaReceived` | `String requestId`, `String delta` | Request ID一致を確認し、Temporary Textへdeltaをそのまま順序追加する。Canonical Messagesは変更しない |
+| `assistantCompleted` | `String requestId`, `List<Message> messages` | Request ID一致とTerminal未確定を確認し、Completed PayloadのCanonical MessagesをMergeして`ready`へ遷移する |
+| `sendFailed` | `ConversationFailure failure` | Terminal Failureを`sendFailed`へ反映する。Partial TextはCanonical化しない |
+| `sendResultUnknown` | `ConversationFailure failure` | `resultCertainty=resultUnknown`を保持した`sendFailed`へ遷移し、Pending Sendを失わない |
+| `failureDismissed` | なし | FIP-010で定義された安全なDismiss条件を満たす場合だけ`ready`へ遷移する。ReducerはUI Actionを解釈しない |
+| `historyReconciliationStarted` | なし | `initialLoading`へ遷移し、既存Canonical MessagesとPending Sendを保持する |
+| `historyReconciliationSucceeded` | `List<Message> canonicalMessages`, `ReconciliationSendResult sendResult` | 再取得HistoryをCanonical Stateへ反映する。送信結果が確認済みの場合だけPending SendをClearし`ready`へ遷移する |
+| `historyReconciliationFailed` | `ConversationFailure failure` | 元のCanonical MessagesとPending Sendを保持し`sendFailed`へ戻す |
 
-`initialLoadSucceeded`はConversation未作成を表す`conversation=null`とEmpty Message Pageを許容する。
+### 12.2 History Reconciliation Result
 
-### 12.2 Pagination
+```text
+ReconciliationSendResult
+├── confirmedCompleted
+└── notConfirmed
+```
 
-- `olderPageLoadStarted`
-- `olderPageLoadSucceeded`
-- `olderPageLoadFailed`
+- `confirmedCompleted`: Reconciliationで対象Logical Sendの完了をCanonical Historyから確認できた状態。Pending SendをClearする。
+- `notConfirmed`: Reconciliationで対象Logical Sendの完了を確認できなかった状態。Pending Sendを維持し、FIP-010がSame-key Retry等の次のActionを判断する。
+- 具体的なMessage Identity判定、再取得回数、Retry UIおよびUser Action MappingはFIP-010で確定する。
 
-Start Eventは現在保持しているCursorと一致する取得だけを許可する。SuccessでPageをMergeし、Failureでは既存MessageとCursorを維持する。
+### 12.3 Pagination Cursor Contract
 
-### 12.3 Send and Streaming
+`olderPageLoadStarted` / `olderPageLoadSucceeded` / `olderPageLoadFailed`は、取得開始時に使用した`requestedCursor`を必ずPayloadへ持つ。Reducerは現在Stateの`pagination.nextCursor`と完全一致する場合だけ対象Pageを適用する。不一致は`protocolViolation`として扱い、別CursorのPageを黙って適用しない。
 
-- `sendStarted`
-- `streamStarted`
-- `assistantDeltaReceived`
-- `assistantCompleted`
-- `sendFailed`
-- `sendResultUnknown`
+### 12.4 Recovery Boundary
 
-`sendStarted`は検証済み`OutgoingMessage`を一つ保持する。`assistantDeltaReceived`はTemporary Textだけを更新し、Canonical Message Listを変更しない。
-
-### 12.4 Recovery
-
-- `failureDismissed`
-- `historyReconciliationStarted`
-- `historyReconciliationSucceeded`
-- `historyReconciliationFailed`
-
-Same-key RetryのI/O開始、User ActionおよびHistory再取得FlowはFIP-010で実装する。本FIPではPending SendとResult Certaintyを失わないTransition Ruleだけを定義する。
-
-History Reconciliation開始時は既存Canonical MessagesとPending Sendを破棄しない。成功時はBackendから再取得したCanonical Historyで置換し、送信結果を確認できた場合だけPending SendをClearする。失敗時は元のCanonical MessagesとPending Sendを維持して`sendFailed`へ戻す。結果確認の具体的判定はFIP-010で確定する。
-
----
+Same-key RetryのI/O開始、History再取得、Retry Button、User Actionおよび具体的なRecovery OrchestrationはFIP-010の責務である。本FIPは、ReducerがPending Send、Request ID、Result CertaintyおよびCanonical Stateを安全に維持できるTransition Contractだけを定義する。
 
 ## 13. State Transition Rules
 
@@ -459,7 +472,27 @@ stateDiagram-v2
     sendFailed --> ready: reconciled or dismissed when safe
 ```
 
-### 13.2 Concurrent Operation Rule
+### 13.2 Reducer Result and Invalid Transition
+
+Pure Reducerの返却値は次の型契約とする。
+
+```text
+ConversationStateReducerResult
+├── StateTransition
+│   └── ConversationScreenState nextState
+└── StateTransitionFailure
+    ├── category: ConversationFailureCategory
+    └── operation: ConversationOperation
+```
+
+- Valid Eventは`StateTransition`としてNext Stateを返す。
+- Invalid Transition、Request ID不一致、Cursor不一致、Terminal重複、Terminal後EventおよびInvariant違反は`StateTransitionFailure`として返す。
+- ReducerはInvalid Transitionを例外として外へ投げたりSilent Ignoreしたりしない。
+- ReducerはI/O、UUID生成、Clock参照、Gateway呼出し、History Reconciliation開始またはUI Action決定を行わない。
+- `StateTransitionFailure`を受けたOrchestratorが、必要に応じてFIP-010のRecovery Flowへ接続する。
+- Protocol Violation時の具体的UI表示、Retry、Reconciliation実行可否はFIP-010が決定する。
+
+### 13.3 Concurrent Operation Rule
 
 - `sending`または`streaming`中に新規Sendを開始しない
 - `sending`または`streaming`中にOlder Page取得を開始しない
@@ -492,11 +525,13 @@ HTTP Error、接続開始失敗等のPre-stream Failureでは、`sendStarted →
 
 ### 14.2 Request ID
 
-- `streamStarted`で`activeRequestId`を設定する
-- 後続Delta / Completed / Failedの`requestId`はActive Requestと一致しなければならない
-- Request ID不一致は`protocolViolation`とする
-- Request IDをUIへ表示またはMetric Tagへ使用しない
-- 必要な非機密Traceだけに使用し、ContentやKeyと組み合わせてLogしない
+- Request IDはInfrastructure / Backend Stream Boundaryから`streamStarted` EventのPayloadとして受け取る。
+- ReducerはRequest IDを生成、採番、正規化または置換しない。
+- `streamStarted`で`activeRequestId`を設定する。
+- 後続Delta / Completed / Failedの`requestId`はActive Requestと一致しなければならない。
+- Request ID不一致は`protocolViolation`として`StateTransitionFailure`を返す。
+- Request IDをUIへ表示またはMetric Tagへ使用しない。
+- 必要な非機密Traceだけに使用し、ContentやKeyと組み合わせてLogしない。
 
 ### 14.3 Delta
 
@@ -546,11 +581,18 @@ oldest → newest
 
 ### 15.3 Completed Messages
 
-- `assistant.completed`のUser / Assistant MessageをIDでCanonical Listへ統合する
-- 既に同一ID・同一内容がある場合は重複追加しない
-- 同一IDで内容が異なる場合は`protocolViolation`とし、History Reconciliationを要求する
-- Assistant MessageはUser Messageより後ろに配置する
-- Reducerが新しいMessage IDやTimestampを生成しない
+`assistant.completed`はDelta結合値ではなく、Event Payloadとして渡されたCanonical Messageを正式結果とする。Mergeは次の順序で決定的に行う。
+
+1. 現在のCanonical Message Listを順序を変えずに基準Listとする。
+2. Completed Payload内のMessageを古い順から処理する。
+3. IDが存在しないMessageは、Payload内の順序を維持して追加候補とする。
+4. 同一IDが既存Listに存在し、全Domain Fieldが一致する場合は既存Entryを維持して重複追加しない。
+5. 同一IDでRole、ContentまたはTimestamp等のDomain Identityを構成するFieldが異なる場合は`protocolViolation`としてMerge全体を適用しない。
+6. 追加対象は既存Canonical Historyの末尾へ、Completed Payload内の順序どおりに追加する。ReducerはTimestampによる再Sortを行わない。
+7. User Message / Assistant Messageの相対順序はBackendのCompleted Payloadを正とし、ReducerがRoleだけを根拠に並べ替えない。
+8. Reducerが新しいMessage IDやTimestampを生成・補完しない。
+
+これにより、Completed Payloadと既存Historyの境界重複はIDで一件に統合され、Conflictは部分適用せずProtocol Violationとして検出される。
 
 ---
 
@@ -594,7 +636,7 @@ FIP-005ではRetry I/Oを実装しないが、後続FIPが破ってはならな�
 | Contract / Protocol Error | `protocolViolation`またはSize Categoryへ分類する |
 | Network / Disconnect | Result Certaintyを区別してFailureへ変換する |
 
-FIP-005はBackend Error CodeとCategoryの境界を定義するが、全Codeごとの表示文言やRetry ButtonはFIP-010で確定する。
+FIP-005はBackend Error CodeとApplication Failure Categoryの境界、`operation`、`resultCertainty`およびStateへの反映方法を定義する。FIP-010はCategoryをUser Action、Retry、History Reconciliation等の具体的Recovery ActionへMappingする。FIP-005はUI文言、Retry Button、再取得回数、Timerまたは具体的Orchestrationを決定しない。
 
 `ConversationFailure.unknown`はForward Compatibility用の安全なFallbackであり、未知Errorを成功扱いしたり自動Retryしたりするために使用しない。
 
@@ -686,7 +728,7 @@ Phase 0 Final Design Review後、次の順序で実装する。
 8. Pure ReducerのInitial Load Transitionを実装する
 9. Pagination TransitionとCanonical Mergeを実装する
 10. Send / Streaming / Terminal Transitionを実装する
-11. Invalid TransitionとProtocol Violationを実装する
+11. `ConversationStateReducerResult`、Invalid TransitionおよびProtocol Violationを実装する
 12. Boundary / Transition / Security Unit Testを実装する
 13. Format、Analyze、対象Testおよび全Frontend Testを実行する
 
@@ -771,7 +813,9 @@ flutter test
 - [ ] 7つのScreen Statusだけを定義している
 - [ ] Canonical Messages、Temporary Text、Pending Sendを分離している
 - [ ] 一つのImmutable State Objectが画面状態のSource of Truthになっている
-- [ ] Status-specific Invariantで矛盾Stateを防いでいる
+- [ ] Status × Field Invariant Matrixで矛盾Stateを防いでいる
+- [ ] 全ConversationStateEventのPayloadとTransition Contractが定義されている
+- [ ] Reducerが`StateTransition` / `StateTransitionFailure`を返し、Invalid TransitionをSilent Ignoreしない
 - [ ] ReducerがPureかつ決定論的である
 - [ ] SSE Event順序、Request IDおよびTerminal Exactly Onceを検証している
 - [ ] Completed EventのCanonical Messageを正式結果としている
@@ -793,7 +837,7 @@ FIP-005 Implementationは次をすべて満たした時点で完了とする。
 1. 本DraftがCross-phase Review後に`Approved / Implementation Ready`へ昇格している
 2. FIP-003 / FIP-004 ImplementationがCompleted / Approvedである
 3. Acceptance Criteriaをすべて満たしている
-4. Reducer Unit Testが全Status、正常遷移およびInvalid Transitionを網羅している
+4. Reducer Unit Testが全Status、正常遷移、Invalid Transition、Request ID不一致、Cursor不一致およびTerminal重複を網羅している
 5. Code ReviewでDependency、State Invariant、SecurityおよびScopeを確認済みである
 6. Planned Commandsがすべて成功している
 7. 設計との差分がない、または差分が先にDesign / ADRへ反映されている
@@ -855,6 +899,23 @@ FIP-006 / FIP-007はApplication StateのI/O処理を追加してはならない�
 
 ---
 
+### 26.x Formal Cross-phase Review Result
+
+FIP-005 Cross-phase Review has been completed against the approved Phase 0–4 design baseline.
+
+- Phase 2 Personal Memory boundary: **PASS**
+- Phase 3 Tool / Permission / Approval / Execution boundary: **PASS**
+- Phase 4 Agent / PC / Browser / Application / Voice boundary: **PASS**
+- Presentation / Application boundary: **PASS**
+- Future extension safety / no premature framework introduction: **PASS**
+- Critical findings: **0**
+- High findings: **0**
+- Blocking Medium findings: **0**
+- Low findings: **0**
+
+No design contradiction or blocking cross-phase issue was identified. No redesign is required as a result of this review.
+
+
 ## 27. AI Coding Assistant Constraints
 
 実装再開時、AI Coding Assistantへ次を明示する。
@@ -890,9 +951,9 @@ FIP-006 / FIP-007はApplication StateのI/O処理を追加してはならない�
 
 - [x] 7つのScreen StatusがFrontend Designと一致している
 - [x] Canonical、Temporary、Pendingを分離している
-- [x] Status-specific Invariantを定義している
+- [x] Status × Field Invariant Matrixを定義している
 - [x] SSE SequenceとTerminal Exactly Onceを定義している
-- [x] Invalid Transitionの扱いを定義している
+- [x] Invalid Transitionを`StateTransitionFailure`として返す契約を定義している
 
 ### Retry and Pagination
 
@@ -909,16 +970,46 @@ FIP-006 / FIP-007はApplication StateのI/O処理を追加してはならない�
 - [x] Cross-phase Review項目を記録している
 
 ---
+- Cross-phase Review: PASS
+- Implementation Ready: YES
+## 29. Formal Cross-phase Review Resolution
 
-## 29. Current Decision and Next Step
+### 29.1 Decision
 
-現在の状態:
+**FIP-005 Cross-phase Review: PASS**
+
+**FIP-005 Status: Approved / Implementation Ready**
+
+### 29.2 Review Findings
+
+- Critical: 0
+- High: 0
+- Blocking Medium: 0
+- Low: 0
+
+### 29.3 Resolution
+
+The cross-phase review confirmed that the FIP-005 Application State design remains consistent with the approved Phase 0–4 architecture and its boundary invariants.
+
+The review confirmed:
+- Conversation History / Application State remains distinct from Personal Memory.
+- Conversation state does not become Tool / Approval / Execution state.
+- Message retry / reconciliation remains distinct from Tool / Agent side-effect retry.
+- Failure and Result Unknown semantics remain explicit and are not guessed.
+- Phase 4 Agent / PC / Browser / Voice concepts are not prematurely introduced into Phase 1 Application State.
+- Presentation concerns remain outside the Application State responsibility.
+
+No redesign or corrective change is required from the cross-phase review.
+
+### 29.4 Current Gate State
 
 ```text
-FIP-005 Document: Draft Created
-FIP-005 Draft Planning: In Progress / User Review Pending
-FIP-005 Implementation: Not Started
-Cross-phase Review: Required
+FIP-005 Document: Approved / Implementation Ready
+FIP-005 Planning: Completed
+Cross-phase Review: PASS
+Blocking Finding: 0
+Implementation: Not Started
 ```
 
-本Draftをユーザーが確認して採用した場合、FIP-005 Draft PlanningをCompletedとして記録する。ソースコード実装には進まず、次にFIP-006 Visual FoundationのDraft実装計画書作成へ進む。
+Implementation may proceed according to the approved FIP-005 implementation procedure and dependency order, subject to the project-level implementation gate.
+
