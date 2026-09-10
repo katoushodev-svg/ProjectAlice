@@ -1,0 +1,33 @@
+{
+  "FIP-005": {
+    "approval_status": "Approved / Implementation Ready",
+    "plan": "docs/fip-005-application-state-plan.md",
+    "prerequisites": ["FIP-001", "FIP-002", "FIP-003", "FIP-004"],
+    "prohibited_changes": [
+      "design",
+      "architecture",
+      "api_contract",
+      "database",
+      "security_safety",
+      "phase_boundary",
+      "fip_scope",
+      "unknown_changes",
+      "new_dependency"
+    ],
+    "required_checks": [
+      "implementation",
+      "focused_test",
+      "analyze",
+      "full_regression",
+      "ai_review",
+      "retest",
+      "rereview"
+    ],
+    "review_policy": "PASS requires evidence and explicit review conclusion",
+    "run_budget": 2,
+    "allowed_paths": [
+      "frontend/lib/conversation/application/**",
+      "frontend/test/conversation/application/**"
+    ]
+  }
+}
