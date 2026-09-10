@@ -260,6 +260,15 @@ def build_candidate(record: dict[str, Any], manifest: dict[str, Any]) -> dict[st
     validate_record(record, manifest)
     fip = record["fip"]
     changed_files = record["changed_files"]
+    plan_name = posixpath.basename(manifest[fip]["plan"])
+    purpose = plan_name.removeprefix(f"{fip.lower()}-").removesuffix("-plan.md").replace(
+        "-", " "
+    )
+    checks = record["checks"]
+    evidence_lines = [
+        f"- {name}: {checks[name]['summary']}"
+        for name in REQUIRED_CHECKS
+    ]
     return {
         "candidate_status": "READY",
         "fip": fip,
@@ -269,19 +278,27 @@ def build_candidate(record: dict[str, Any], manifest: dict[str, Any]) -> dict[st
         "changed_files": changed_files,
         "manufacturing_record": record,
         "commit_candidate": {
-            "message": f"feat({fip}): apply approved implementation",
+            "message": f"feat({fip.lower()}): implement {purpose}",
             "files": changed_files,
         },
         "pr_candidate": {
             "title": f"[{fip}] Manufacturing PASS candidate",
             "base": "main",
             "head": record["branch"],
-            "body": (
-                f"Manufacturing PASS for {fip}.\n\n"
-                f"Run: {record['run_id']}\n"
-                "The attached Manufacturing Record contains implementation, "
-                "test, analyze, review, auto-fix, and re-review evidence.\n\n"
-                "Auto-merge: disabled."
+            "body": "\n".join(
+                [
+                    f"FIP: {fip}",
+                    "Manufacturing PASS: PASS",
+                    f"Run: {record['run_id']}",
+                    "Manufacturing Record: attached in candidate evidence",
+                    "",
+                    "Required checks:",
+                    *evidence_lines,
+                    f"- auto fix: {record['auto_fix']['summary']}",
+                    f"- changed files: {', '.join(changed_files)}",
+                    "- Human Gate: clear",
+                    "- Auto-merge: disabled",
+                ]
             ),
         },
         "actions_performed": {
