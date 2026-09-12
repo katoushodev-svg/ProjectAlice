@@ -9,7 +9,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 
 class GitSafetyError(ValueError):
@@ -37,6 +37,63 @@ class AutomationResult:
     push: bool = False
     pull_request: bool = False
     commit_hash: str | None = None
+    pull_request_url: str | None = None
+
+
+@dataclass(frozen=True)
+class EvidenceCommitAuthorization:
+    run_id: str
+    branch: str
+    implementation_commit_sha: str
+    primary_evidence_id: str
+    primary_evidence_path: str
+    primary_evidence_generation_confirmed: bool
+    push_not_performed: bool
+    unresolved_unknown_absent: bool
+
+
+@dataclass(frozen=True)
+class EvidenceCommitResult:
+    status: str
+    operation: str
+    reason: str
+    run_id: str | None = None
+    branch: str | None = None
+    implementation_commit_sha: str | None = None
+    evidence_commit_sha: str | None = None
+    committed_path: str | None = None
+
+
+@dataclass(frozen=True)
+class PushResult:
+    status: str
+    operation: str
+    reason: str
+    run_id: str
+    branch: str
+    pushed_commit_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class RemoteVerificationResult:
+    status: str
+    operation: str
+    reason: str
+    run_id: str
+    branch: str
+    expected_branch: str
+    expected_commit_sha: str
+    remote_branch: str | None = None
+    remote_commit_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class PullRequestResult:
+    status: str
+    operation: str
+    reason: str
+    run_id: str
+    branch: str
     pull_request_url: str | None = None
 
 
@@ -146,6 +203,345 @@ class ManufacturingGitAutomation:
                 push=push_verified,
                 commit_hash=commit_hash,
             )
+
+    def commit_evidence(
+        self,
+        authorization: EvidenceCommitAuthorization | Mapping[str, object],
+        evidence_paths: Sequence[str],
+        branch: str,
+        implementation_commit_sha: str,
+        message: str,
+    ) -> EvidenceCommitResult:
+        operation = "commit_evidence"
+        values: dict[str, object] = {}
+        try:
+            values = self._validate_evidence_authorization(authorization)
+            run_id = self._required_string(values, "run_id")
+            authorized_branch = self._required_string(values, "branch")
+            authorized_sha = self._required_string(values, "implementation_commit_sha")
+            evidence_id = self._required_string(values, "primary_evidence_id")
+            authorized_path = self._required_string(values, "primary_evidence_path")
+            self._validate_evidence_preconditions(
+                values,
+                evidence_paths,
+                branch,
+                implementation_commit_sha,
+                authorized_branch,
+                authorized_sha,
+                evidence_id,
+                authorized_path,
+                message,
+            )
+
+            current_branch = self._read_required("git", "branch", "--show-current")
+            if current_branch != branch:
+                raise GitSafetyError("current branch does not match the Evidence authorization")
+            current_sha = self._read_required("git", "rev-parse", "HEAD")
+            if current_sha != implementation_commit_sha:
+                raise GitSafetyError("current HEAD does not match the Implementation Commit")
+            status = self._run(
+                "git", "status", "--porcelain", "--untracked-files=all"
+            ).stdout
+            actual_paths = {line[3:] for line in status.splitlines() if len(line) >= 4}
+            if actual_paths != {authorized_path}:
+                raise GitSafetyError("worktree changes do not exactly match Primary Evidence")
+
+            self._run("git", "add", "--", authorized_path)
+            self._run("git", "commit", "-m", message)
+            evidence_commit_sha = self._read_required("git", "rev-parse", "HEAD")
+            parent_sha = self._read_required("git", "rev-parse", "HEAD^")
+            if parent_sha != implementation_commit_sha:
+                raise GitResultUnknown("Evidence Commit parent could not be verified")
+            committed_paths = self._read_commit_paths(evidence_commit_sha)
+            if committed_paths != {authorized_path}:
+                raise GitResultUnknown("Evidence Commit paths could not be verified")
+            return EvidenceCommitResult(
+                "SUCCESS",
+                operation,
+                "Primary Evidence committed and verified",
+                run_id=run_id,
+                branch=branch,
+                implementation_commit_sha=implementation_commit_sha,
+                evidence_commit_sha=evidence_commit_sha,
+                committed_path=authorized_path,
+            )
+        except GitResultUnknown as error:
+            return EvidenceCommitResult(
+                "UNKNOWN",
+                operation,
+                str(error),
+                run_id=values.get("run_id") if isinstance(values.get("run_id"), str) else None,
+                branch=branch,
+                implementation_commit_sha=implementation_commit_sha,
+                committed_path=values.get("primary_evidence_path")
+                if isinstance(values.get("primary_evidence_path"), str)
+                else None,
+            )
+        except GitSafetyError as error:
+            return EvidenceCommitResult(
+                "FAILURE",
+                operation,
+                str(error),
+                run_id=values.get("run_id") if isinstance(values.get("run_id"), str) else None,
+                branch=branch,
+                implementation_commit_sha=implementation_commit_sha,
+                committed_path=values.get("primary_evidence_path")
+                if isinstance(values.get("primary_evidence_path"), str)
+                else None,
+            )
+
+    def push(
+        self,
+        run_id: str,
+        branch: str,
+        expected_commit_sha: str,
+        *,
+        evidence_commit_completed: bool,
+        unresolved_unknown_absent: bool,
+        remote: str = "origin",
+    ) -> PushResult:
+        operation = "push"
+        try:
+            self._validate_run_identity(run_id, branch, expected_commit_sha)
+            self._validate_isolated_branch(branch)
+            if evidence_commit_completed is not True:
+                raise GitSafetyError("Evidence Commit must succeed before Push")
+            if unresolved_unknown_absent is not True:
+                raise GitSafetyError("unresolved UNKNOWN state blocks Push")
+            if not remote or remote.startswith("-"):
+                raise GitSafetyError("remote is invalid")
+
+            current_branch = self._read_required("git", "branch", "--show-current")
+            if current_branch != branch:
+                raise GitSafetyError("current branch does not match Push target")
+            current_sha = self._read_required("git", "rev-parse", "HEAD")
+            if current_sha != expected_commit_sha:
+                raise GitSafetyError("current HEAD does not match expected commit")
+            self._run("git", "push", "--set-upstream", remote, branch)
+            pushed_sha = self._read_required("git", "rev-parse", "HEAD")
+            if pushed_sha != expected_commit_sha:
+                raise GitResultUnknown("pushed commit SHA could not be verified")
+            return PushResult(
+                "SUCCESS", operation, "Push completed and commit SHA verified",
+                run_id, branch, pushed_sha,
+            )
+        except GitResultUnknown as error:
+            return PushResult("UNKNOWN", operation, str(error), run_id, branch)
+        except GitSafetyError as error:
+            return PushResult("FAILURE", operation, str(error), run_id, branch)
+
+    def verify_remote(
+        self,
+        push_result: PushResult,
+        *,
+        expected_branch: str,
+        expected_commit_sha: str,
+        remote: str = "origin",
+    ) -> RemoteVerificationResult:
+        operation = "verify_remote"
+        run_id = push_result.run_id
+        branch = push_result.branch
+        try:
+            self._validate_run_identity(run_id, branch, expected_commit_sha)
+            self._validate_isolated_branch(expected_branch)
+            if push_result.status != "SUCCESS":
+                raise GitSafetyError("Remote Verification requires successful Push")
+            if push_result.branch != expected_branch:
+                raise GitSafetyError("Push branch does not match expected branch")
+            if push_result.pushed_commit_sha != expected_commit_sha:
+                raise GitSafetyError("Push commit does not match expected commit")
+            if not remote or remote.startswith("-"):
+                raise GitSafetyError("remote is invalid")
+
+            output = self._read("git", "ls-remote", remote, f"refs/heads/{expected_branch}")
+            fields = output.split()
+            if len(fields) != 2 or not fields[1].startswith("refs/heads/"):
+                raise GitResultUnknown("remote branch state could not be parsed")
+            remote_commit_sha = fields[0]
+            remote_branch = fields[1].removeprefix("refs/heads/")
+            if not remote_commit_sha or not remote_branch:
+                raise GitResultUnknown("remote branch state is incomplete")
+            if remote_branch != expected_branch or remote_commit_sha != expected_commit_sha:
+                return RemoteVerificationResult(
+                    "FAILURE", operation, "remote branch or commit does not match",
+                    run_id, branch, expected_branch, expected_commit_sha,
+                    remote_branch, remote_commit_sha,
+                )
+            return RemoteVerificationResult(
+                "SUCCESS", operation, "remote branch and commit verified",
+                run_id, branch, expected_branch, expected_commit_sha,
+                remote_branch, remote_commit_sha,
+            )
+        except GitResultUnknown as error:
+            return RemoteVerificationResult(
+                "UNKNOWN", operation, str(error), run_id, branch,
+                expected_branch, expected_commit_sha,
+            )
+        except GitSafetyError as error:
+            return RemoteVerificationResult(
+                "FAILURE", operation, str(error), run_id, branch,
+                expected_branch, expected_commit_sha,
+            )
+
+    def create_pull_request(
+        self,
+        verification_result: RemoteVerificationResult,
+        *,
+        title: str,
+        body: str,
+        base: str = "main",
+    ) -> PullRequestResult:
+        operation = "create_pull_request"
+        run_id = verification_result.run_id
+        branch = verification_result.branch
+        try:
+            self._validate_isolated_branch(branch)
+            if verification_result.status != "SUCCESS":
+                raise GitSafetyError("Pull Request requires successful Remote Verification")
+            if verification_result.expected_branch != branch:
+                raise GitSafetyError("verified branch does not match Pull Request head")
+            if base != "main":
+                raise GitSafetyError("Pull Request base must be main")
+            if not title or not body:
+                raise GitSafetyError("Pull Request title and body are required")
+            if not self._gh_available:
+                raise GitSafetyError("GitHub CLI is not available")
+            output = self._read(
+                "gh", "pr", "create", "--base", base, "--head", branch,
+                "--title", title, "--body", body,
+            )
+            match = re.search(r"https://github\.com/[^\s]+/pull/\d+", output)
+            if not match:
+                raise GitResultUnknown("Pull Request URL could not be verified")
+            return PullRequestResult(
+                "SUCCESS", operation, "Pull Request created and URL verified",
+                run_id, branch, match.group(0),
+            )
+        except GitResultUnknown as error:
+            return PullRequestResult("UNKNOWN", operation, str(error), run_id, branch)
+        except GitSafetyError as error:
+            return PullRequestResult("FAILURE", operation, str(error), run_id, branch)
+
+    @staticmethod
+    def _validate_run_identity(run_id: str, branch: str, commit_sha: str) -> None:
+        if not isinstance(run_id, str) or not run_id:
+            raise GitSafetyError("run_id is required")
+        if not isinstance(branch, str) or not branch:
+            raise GitSafetyError("branch is required")
+        if not isinstance(commit_sha, str) or not commit_sha:
+            raise GitSafetyError("commit SHA is required")
+
+    @staticmethod
+    def _validate_isolated_branch(branch: str) -> None:
+        if not branch.startswith("fip-") or branch == "main":
+            raise GitSafetyError("an isolated FIP branch is required")
+
+    @staticmethod
+    def _validate_evidence_authorization(
+        authorization: EvidenceCommitAuthorization | Mapping[str, object],
+    ) -> dict[str, object]:
+        if isinstance(authorization, EvidenceCommitAuthorization):
+            return {
+                "run_id": authorization.run_id,
+                "branch": authorization.branch,
+                "implementation_commit_sha": authorization.implementation_commit_sha,
+                "primary_evidence_id": authorization.primary_evidence_id,
+                "primary_evidence_path": authorization.primary_evidence_path,
+                "primary_evidence_generation_confirmed": authorization.primary_evidence_generation_confirmed,
+                "push_not_performed": authorization.push_not_performed,
+                "unresolved_unknown_absent": authorization.unresolved_unknown_absent,
+            }
+        if not isinstance(authorization, Mapping):
+            raise GitSafetyError("Evidence authorization must be an object")
+        required = (
+            "run_id",
+            "branch",
+            "implementation_commit_sha",
+            "primary_evidence_id",
+            "primary_evidence_path",
+            "primary_evidence_generation_confirmed",
+            "push_not_performed",
+            "unresolved_unknown_absent",
+        )
+        missing = [field for field in required if field not in authorization]
+        if missing:
+            raise GitSafetyError("Evidence authorization fields are missing: " + ", ".join(missing))
+        return {field: authorization[field] for field in required}
+
+    @staticmethod
+    def _required_string(values: Mapping[str, object], field: str) -> str:
+        value = values.get(field)
+        if not isinstance(value, str) or not value:
+            raise GitSafetyError(f"Evidence authorization field is invalid: {field}")
+        return value
+
+    def _validate_evidence_preconditions(
+        self,
+        values: Mapping[str, object],
+        evidence_paths: Sequence[str],
+        branch: str,
+        implementation_commit_sha: str,
+        authorized_branch: str,
+        authorized_sha: str,
+        evidence_id: str,
+        authorized_path: str,
+        message: str,
+    ) -> None:
+        booleans = (
+            "primary_evidence_generation_confirmed",
+            "push_not_performed",
+            "unresolved_unknown_absent",
+        )
+        if any(values.get(field) is not True for field in booleans):
+            raise GitSafetyError("Evidence authorization preconditions are not satisfied")
+        if branch != authorized_branch or implementation_commit_sha != authorized_sha:
+            raise GitSafetyError("Evidence authorization does not match the requested Git state")
+        if not branch.startswith("fip-") or branch == "main":
+            raise GitSafetyError("an isolated FIP branch is required")
+        if not evidence_id or Path(evidence_id).name != evidence_id or evidence_id in {".", ".."}:
+            raise GitSafetyError("Primary Evidence ID is invalid")
+        expected_path = f"manufacturing/evidence/{evidence_id}.json"
+        if authorized_path != expected_path:
+            raise GitSafetyError("Primary Evidence path does not match its Evidence ID")
+        if isinstance(evidence_paths, (str, bytes)) or list(evidence_paths) != [authorized_path]:
+            raise GitSafetyError("exactly the authorized Primary Evidence must be staged")
+        if message != f"manufacturing: add evidence {evidence_id}":
+            raise GitSafetyError("Evidence Commit message is invalid")
+        self._validate_evidence_path(authorized_path)
+
+    @staticmethod
+    def _validate_evidence_path(path: str) -> None:
+        path_value = Path(path)
+        if path_value.is_absolute() or ".git" in path_value.parts or ".." in path_value.parts:
+            raise GitSafetyError("Primary Evidence path is unsafe")
+        if path != path_value.as_posix() or not path.startswith("manufacturing/evidence/"):
+            raise GitSafetyError("Primary Evidence path is outside the Evidence directory")
+        root = Path.cwd().resolve()
+        target = root / path
+        current = root
+        for component in path_value.parts:
+            current /= component
+            if current.is_symlink():
+                raise GitSafetyError("Primary Evidence path contains a symlink")
+        resolved_target = target.resolve(strict=False)
+        try:
+            resolved_target.relative_to(root)
+        except ValueError as error:
+            raise GitSafetyError("Primary Evidence path escapes the repository") from error
+        if resolved_target.parent != root / "manufacturing" / "evidence":
+            raise GitSafetyError("Primary Evidence path escapes the Evidence directory")
+        if not target.is_file():
+            raise GitSafetyError("Primary Evidence file does not exist")
+
+    def _read_required(self, *arguments: str) -> str:
+        value = self._read(*arguments)
+        if not value:
+            raise GitResultUnknown(f"command result could not be verified: {' '.join(arguments)}")
+        return value
+
+    def _read_commit_paths(self, commit_sha: str) -> set[str]:
+        output = self._read("git", "show", "--format=", "--name-only", commit_sha)
+        return {line for line in output.splitlines() if line}
 
     def _preflight(self, candidate: dict, expected_remote: str) -> None:
         if candidate.get("candidate_status") != "READY":
