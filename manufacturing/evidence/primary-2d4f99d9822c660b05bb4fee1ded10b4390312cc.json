@@ -1,0 +1,104 @@
+{
+  "schema_version": "1",
+  "evidence_id": "primary-2d4f99d9822c660b05bb4fee1ded10b4390312cc",
+  "evidence_type": "PRIMARY",
+  "fip_id": "FIP-005",
+  "pipeline_step": "manufacturing-automation-implementation-commit-a",
+  "run_id": "run-46b00df6fdf64406a590e8cba5053cdb",
+  "created_at": "2026-09-12T05:20:37+00:00",
+  "repository": {
+    "repository": "katoushodev-svg/ProjectAlice",
+    "branch": "fip-005/manufacturing-automation",
+    "implementation_commit_sha": "2d4f99d9822c660b05bb4fee1ded10b4390312cc",
+    "base_sha": "88e5dbe2d0462e4736ef1823e042195af131ae7f",
+    "worktree_status": "clean",
+    "changed_files": [
+      "manufacturing/evidence/.gitkeep",
+      "scripts/manufacturing_evidence.py",
+      "scripts/manufacturing_git.py",
+      "scripts/manufacturing_runtime.py",
+      "scripts/test_manufacturing_evidence.py",
+      "scripts/test_manufacturing_git.py",
+      "scripts/test_manufacturing_runtime.py"
+    ]
+  },
+  "manufacturing": {
+    "manifest_path": "scripts/manufacturing_manifest.json",
+    "approval_status": "FIP-005 manifest approval_status is 'Approved / Implementation Ready'; this commit is Manufacturing Pipeline Infrastructure and was not evaluated against FIP-005 allowed_paths",
+    "prerequisite_result": "PASS via FINAL-A/B/C Human Approval, Staged Git API Extension review, Runtime Implementation review, and Commit Pre-Review (Implementation Readiness: READY)",
+    "allowed_paths": [
+      "frontend/lib/conversation/application/**",
+      "frontend/test/conversation/application/**"
+    ],
+    "prohibited_changes": [
+      "design",
+      "architecture",
+      "api_contract",
+      "database",
+      "security_safety",
+      "phase_boundary",
+      "fip_scope",
+      "unknown_changes",
+      "new_dependency"
+    ],
+    "manufacturing_result": "NOT_EVALUATED_BY_FIP005_MANIFEST_GATE",
+    "manufacturing_reason": "Changed files are scripts/** and manufacturing/evidence/.gitkeep, which fall outside the FIP-005 manifest allowed_paths (frontend/**); build_candidate() was not run for this commit. This commit was reviewed and approved as Manufacturing Pipeline Infrastructure through FINAL-A/B/C Human Approval, Staged Git API Extension review, Manufacturing Runtime Implementation review, Commit Pre-Review (FINDING-001 identified and closed), and re-review, not through the FIP-005 code manifest gate.",
+    "required_checks": [
+      "implementation",
+      "focused_test",
+      "analyze",
+      "full_regression",
+      "auto_fix",
+      "retest"
+    ]
+  },
+  "verification": {
+    "implementation": {
+      "status": "PASS",
+      "summary": "Staged Git API Extension (push/verify_remote/create_pull_request), Manufacturing Runtime orchestrator, and supporting tests implemented across scripts/manufacturing_git.py and scripts/manufacturing_runtime.py"
+    },
+    "focused_test": {
+      "status": "PASS",
+      "summary": "python3 -m unittest scripts.test_manufacturing_git and scripts.test_manufacturing_runtime passed"
+    },
+    "analyze": {
+      "status": "PASS",
+      "summary": "python3 -m py_compile on all changed Python files passed; flutter analyze reported no issues"
+    },
+    "full_regression": {
+      "status": "PASS",
+      "summary": "python3 -m unittest discover -s scripts -p test_*.py passed 73 tests; flutter test passed 48 tests"
+    },
+    "auto_fix": {
+      "status": "PASS",
+      "summary": "FINDING-001 (PR_CREATED state transition ordered before create_pull_request() result) identified during Commit Pre-Review and fixed in scripts/manufacturing_runtime.py"
+    },
+    "retest": {
+      "status": "PASS",
+      "summary": "After the FINDING-001 fix, scripts.test_manufacturing_runtime (7 tests) and the full scripts test suite (73 tests) were re-run and passed"
+    }
+  },
+  "reviews": {
+    "design_review": {
+      "conclusion": "PASS",
+      "evidence": "FINAL-A/B/C Human Approval and the Staged Git API Extension consolidated Human Gate confirmed Runtime scope, staged Git lifecycle, and manifest boundary before implementation began",
+      "reviewed_commit_sha": "2d4f99d9822c660b05bb4fee1ded10b4390312cc"
+    },
+    "implementation_review": {
+      "conclusion": "PASS",
+      "evidence": "AI Self Review confirmed apply() is unchanged, Runtime contains no direct git/gh/subprocess calls, no new dependency was added, and docs/frontend/manifest were not modified",
+      "reviewed_commit_sha": "2d4f99d9822c660b05bb4fee1ded10b4390312cc"
+    },
+    "re_review": {
+      "conclusion": "PASS",
+      "evidence": "Commit Pre-Review identified FINDING-001; after the fix, re-review confirmed PR FAILURE/UNKNOWN no longer transition to PR_CREATED and fail-closed behavior is preserved across Evidence Commit, Push, Remote Verification, and Pull Request stages",
+      "reviewed_commit_sha": "2d4f99d9822c660b05bb4fee1ded10b4390312cc"
+    }
+  },
+  "outcome": {
+    "status": "PASS",
+    "human_gate": false,
+    "unknown": false,
+    "stop_reason": "Recorded prior to Evidence Commit; awaiting G1 Human Decision after Push, Remote Verification, and Pull Request"
+  }
+}
