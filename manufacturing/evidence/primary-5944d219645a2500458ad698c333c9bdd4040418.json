@@ -1,0 +1,103 @@
+{
+  "schema_version": "1",
+  "evidence_id": "primary-5944d219645a2500458ad698c333c9bdd4040418",
+  "evidence_type": "PRIMARY",
+  "fip_id": "FIP-005",
+  "pipeline_step": "manufacturing-automation-implementation-commit-b",
+  "run_id": "run-77d19df637474a2ab0b4588918d4375a",
+  "created_at": "2026-09-12T10:19:44.635733+00:00",
+  "repository": {
+    "repository": "katoushodev-svg/ProjectAlice",
+    "branch": "fip-005/manufacturing-automation",
+    "implementation_commit_sha": "5944d219645a2500458ad698c333c9bdd4040418",
+    "base_sha": "c04a49bb78d59809366b3848b4891d14f006b05d",
+    "worktree_status": "clean",
+    "changed_files": [
+      "scripts/manufacturing_coding_agent_adapter.py",
+      "scripts/manufacturing_executor.py",
+      "scripts/manufacturing_runtime.py",
+      "scripts/test_manufacturing_coding_agent_adapter.py",
+      "scripts/test_manufacturing_executor.py",
+      "scripts/test_manufacturing_runtime.py"
+    ]
+  },
+  "manufacturing": {
+    "manifest_path": "scripts/manufacturing_manifest.json",
+    "approval_status": "FIP-005 manifest approval_status is \"Approved / Implementation Ready\"; this commit is Manufacturing Pipeline Infrastructure and was not evaluated against FIP-005 allowed_paths",
+    "prerequisite_result": "PASS via Human Gate approval, SubprocessCodingAgentAdapter review, ManufacturingExecutor review, and Commit Pre-Review (Implementation Readiness: READY)",
+    "allowed_paths": [
+      "frontend/lib/conversation/application/**",
+      "frontend/test/conversation/application/**"
+    ],
+    "prohibited_changes": [
+      "design",
+      "architecture",
+      "api_contract",
+      "database",
+      "security_safety",
+      "phase_boundary",
+      "fip_scope",
+      "unknown_changes",
+      "new_dependency"
+    ],
+    "manufacturing_result": "NOT_EVALUATED_BY_FIP005_MANIFEST_GATE",
+    "manufacturing_reason": "Changed files are scripts/** which fall outside the FIP-005 manifest allowed_paths (frontend/**); build_candidate() was not run for this commit. This commit was reviewed and approved as Manufacturing Pipeline Infrastructure through Human Gate approval, Coding Agent Adapter review, Manufacturing Executor review, Commit Pre-Review, and re-review, not through the FIP-005 code manifest gate.",
+    "required_checks": [
+      "implementation",
+      "focused_test",
+      "analyze",
+      "full_regression",
+      "auto_fix",
+      "retest"
+    ]
+  },
+  "verification": {
+    "implementation": {
+      "status": "PASS",
+      "summary": "SubprocessCodingAgentAdapter (context building, execution, response parsing, sanitization) and ManufacturingExecutor (job execution, validation, preflight, review/retest loop) implemented and connected to ManufacturingRuntime"
+    },
+    "focused_test": {
+      "status": "PASS",
+      "summary": "python3 -m unittest scripts.test_manufacturing_coding_agent_adapter scripts.test_manufacturing_executor scripts.test_manufacturing_runtime passed (69 tests)"
+    },
+    "analyze": {
+      "status": "PASS",
+      "summary": "python3 -m py_compile on all changed Python files passed; flutter analyze reported no issues"
+    },
+    "full_regression": {
+      "status": "PASS",
+      "summary": "python3 -m unittest discover -s scripts -p test_*.py passed (135 tests); flutter test passed (48 tests)"
+    },
+    "auto_fix": {
+      "status": "PASS",
+      "summary": "No defect was identified during implementation pre-review; all adapter and executor tests passed on first run"
+    },
+    "retest": {
+      "status": "PASS",
+      "summary": "Full regression suite (135 Python unit tests and 48 Flutter tests) passed"
+    }
+  },
+  "reviews": {
+    "design_review": {
+      "conclusion": "PASS",
+      "evidence": "Human Gate approval confirmed SubprocessCodingAgentAdapter and ManufacturingExecutor integration architecture, fail-closed boundaries, security constraints, and forbidden fields before implementation",
+      "reviewed_commit_sha": "5944d219645a2500458ad698c333c9bdd4040418"
+    },
+    "implementation_review": {
+      "conclusion": "PASS",
+      "evidence": "Confirmed adapter sanitization, path traversal defense, timeout handling, strict forbidden changes enforcement, and no unauthorized dependencies or changes to formal design / frontend / manifest",
+      "reviewed_commit_sha": "5944d219645a2500458ad698c333c9bdd4040418"
+    },
+    "re_review": {
+      "conclusion": "PASS",
+      "evidence": "Post-implementation review confirmed all 69 focused tests and 135 total unit tests pass with zero regressions and clean architecture compliance",
+      "reviewed_commit_sha": "5944d219645a2500458ad698c333c9bdd4040418"
+    }
+  },
+  "outcome": {
+    "status": "PASS",
+    "human_gate": false,
+    "unknown": false,
+    "stop_reason": "Recorded prior to Evidence Commit; awaiting G1 Human Decision after Push, Remote Verification, and Pull Request"
+  }
+}

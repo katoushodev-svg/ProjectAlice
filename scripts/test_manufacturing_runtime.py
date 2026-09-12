@@ -1,12 +1,30 @@
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from manufacturing_coding_agent_adapter import (  # noqa: E402
+    CodingAgentAdapterError,
+    REPOSITORY_ROOT,
+    SubprocessCodingAgentAdapter,
+)
+from manufacturing_executor import (  # noqa: E402
+    CodingExecutor,
+    ExecutorSecurityError,
+    ExecutorValidationError,
+    ImplementationJob,
+    ImplementationResult,
+    ManufacturingExecutor,
+    STATUS_FAILURE,
+    STATUS_SUCCESS,
+    STATUS_UNKNOWN,
+)
 from manufacturing_git import (  # noqa: E402
     EvidenceCommitResult,
     PullRequestResult,
@@ -17,6 +35,7 @@ from manufacturing_runtime import (  # noqa: E402
     EVIDENCE_COMMIT,
     ESCALATED,
     G1_HANDOFF,
+    IMPLEMENTING,
     ManufacturingRuntime,
     PRIMARY_EVIDENCE,
     QUALITY_PASS,
@@ -223,6 +242,169 @@ class RuntimeTest(unittest.TestCase):
         runtime, _ = self.runtime(git=git)
         runtime.run(self.job())
         self.assertNotIn("apply", git.calls)
+
+
+class FakeCompleted:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class RuntimeExecutorCodexIntegrationTest(unittest.TestCase):
+    def setUp(self):
+        self.adapter = SubprocessCodingAgentAdapter(cli_command=[sys.executable, "ignored"])
+        self.executor = ManufacturingExecutor(adapter=self.adapter, manifest=MANIFEST)
+        self.runtime = ManufacturingRuntime(MANIFEST, executor=self.executor)
+
+    def sample_impl_job(self) -> dict:
+        return {
+            "fip": "FIP-005",
+            "run_id": "run-fip005-test",
+            "source_of_truth": [
+                "docs/fip-005-application-state-plan.md",
+                "docs/frontend-implementation-plan.md",
+            ],
+            "allowed_paths": [
+                "frontend/lib/conversation/application/**",
+                "frontend/test/conversation/application/**",
+            ],
+            "prompt": "Implement pure conversation state reducer for FIP-005; malicious_arg --dangerous",
+        }
+
+    # A. Runtime -> Executor -> Adapter の接続
+    def test_runtime_to_executor_to_adapter_connection(self):
+        fake = FakeCompleted(
+            0,
+            stdout='{"changed_files": ["frontend/lib/conversation/application/state/reducer.dart"]}',
+        )
+        with patch("manufacturing_coding_agent_adapter.subprocess.run", return_value=fake):
+            result = self.runtime.execute_implementation(self.sample_impl_job())
+        self.assertEqual(result.status, STATUS_SUCCESS)
+        self.assertEqual(
+            result.changed_files,
+            ("frontend/lib/conversation/application/state/reducer.dart",),
+        )
+
+    # B. Codex argvが期待どおりであること & C. promptがargvの最後の1要素として渡ること
+    def test_codex_argv_structure_and_prompt_as_last_element(self):
+        job_data = self.sample_impl_job()
+        fake = FakeCompleted(0, stdout='{"changed_files": []}')
+        with patch("manufacturing_coding_agent_adapter.subprocess.run", return_value=fake) as mock_run:
+            result = self.runtime.execute_implementation(job_data)
+
+        self.assertEqual(result.status, STATUS_SUCCESS)
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args.args[0]
+        expected_cmd = [
+            sys.executable,
+            "exec",
+            "-C",
+            str(REPOSITORY_ROOT),
+            "-s",
+            "workspace-write",
+            "--json",
+            job_data["prompt"],
+        ]
+        self.assertEqual(cmd, expected_cmd)
+        self.assertEqual(cmd[-1], job_data["prompt"])
+        self.assertNotIn("shell", mock_run.call_args.kwargs)
+
+    # D. Jobからcommandを注入できないこと
+    def test_job_cannot_inject_command(self):
+        job_data = self.sample_impl_job()
+        job_data["command"] = "rm -rf /"
+        with self.assertRaises(ExecutorSecurityError):
+            self.runtime.execute_implementation(job_data)
+
+    # E. workspace境界が維持されること
+    def test_workspace_boundary_enforced(self):
+        job_data = self.sample_impl_job()
+        job_data["allowed_paths"] = ["../outside_repo/**"]
+        with self.assertRaises(ExecutorSecurityError):
+            self.runtime.execute_implementation(job_data)
+
+    # F. SUCCESS / FAILURE / UNKNOWNが維持されること
+    def test_status_success_failure_unknown_maintained(self):
+        # SUCCESS
+        fake_success = FakeCompleted(0, stdout='{"changed_files": []}')
+        with patch("manufacturing_coding_agent_adapter.subprocess.run", return_value=fake_success):
+            res_succ = self.runtime.execute_implementation(self.sample_impl_job())
+        self.assertEqual(res_succ.status, STATUS_SUCCESS)
+        self.assertFalse(res_succ.unknown)
+
+        # FAILURE
+        fake_fail = FakeCompleted(1, stderr="compile error")
+        with patch("manufacturing_coding_agent_adapter.subprocess.run", return_value=fake_fail):
+            res_fail = self.runtime.execute_implementation(self.sample_impl_job())
+        self.assertEqual(res_fail.status, STATUS_FAILURE)
+        self.assertFalse(res_fail.unknown)
+
+        # UNKNOWN on timeout
+        with patch(
+            "manufacturing_coding_agent_adapter.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="codex", timeout=1),
+        ):
+            res_unk = self.runtime.execute_implementation(self.sample_impl_job())
+        self.assertEqual(res_unk.status, STATUS_UNKNOWN)
+        self.assertTrue(res_unk.unknown)
+
+    # G. UNKNOWNでretry_allowed=False
+    def test_unknown_disallows_retry(self):
+        with patch(
+            "manufacturing_coding_agent_adapter.subprocess.run",
+            side_effect=OSError("connection reset"),
+        ):
+            res_unk = self.runtime.execute_implementation(self.sample_impl_job())
+        self.assertEqual(res_unk.status, STATUS_UNKNOWN)
+        self.assertFalse(res_unk.retry_allowed)
+
+    # H. RuntimeがGit/Evidence/PRを直接呼ばないこと (静的検査)
+    def test_runtime_does_not_execute_direct_git_or_codex(self):
+        source = Path(REPOSITORY_ROOT / "scripts" / "manufacturing_runtime.py").read_text(
+            encoding="utf-8"
+        )
+        forbidden_calls = (
+            "subprocess.run",
+            "subprocess.Popen",
+            "git push",
+            "git commit",
+            "gh pr",
+        )
+        for pattern in forbidden_calls:
+            self.assertNotIn(pattern, source)
+
+    # Full lifecycle with implementation_job in job payload
+    def test_full_run_lifecycle_with_implementation_job(self):
+        fake_git = FakeGit()
+        fake_evidence = FakeEvidenceStore(Path(tempfile.mkdtemp()))
+        runtime = ManufacturingRuntime(
+            MANIFEST,
+            executor=self.executor,
+            git_layer=fake_git,
+            evidence_store=fake_evidence,
+            lock_path=fake_evidence.directory / ".runtime.lock",
+        )
+        job_payload = {
+            "fip": "FIP-005",
+            "record": passing_record(),
+            "primary_evidence": primary_evidence(),
+            "preflight": {
+                "status": "PASS",
+                "branch": "fip-005/runtime-test",
+                "worktree_status": "clean",
+                "origin": "origin",
+            },
+            "implementation_job": self.sample_impl_job(),
+        }
+        fake = FakeCompleted(
+            0,
+            stdout='{"changed_files": ["frontend/lib/conversation/application/state/reducer.dart"]}',
+        )
+        with patch("manufacturing_coding_agent_adapter.subprocess.run", return_value=fake):
+            res = runtime.run(job_payload)
+        self.assertEqual(res.state, G1_HANDOFF)
+        self.assertIn(IMPLEMENTING, res.history)
 
 
 if __name__ == "__main__":
