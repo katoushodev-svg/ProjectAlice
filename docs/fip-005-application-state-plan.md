@@ -6,12 +6,12 @@
 |---|---|
 | Document | `fip-005-application-state-plan.md` |
 | FIP | FIP-005 Application State |
-| Status | Draft |
+| Status | Approved |
 | Draft Planning | Completed / User Approved Revision |
-| Implementation | Not Started |
+| Implementation | Completed |
 | Review Required After Phase 2-4 Design | Yes |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-09-09 JST |
+| Last Updated | 2026-09-12 JST |
 
 本ドキュメントは、Phase 1 FrontendのApplication State、Gateway PortおよびPure Reducerを、後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義するDraft実装計画である。
 
@@ -388,6 +388,8 @@ Rules:
 - Raw Body、Frame、Delta、Message Content、CursorまたはIdempotency Keyを保持しない
 - User向け日本語文言をApplication Modelへ固定しない
 - CategoryからUI文言とActionへの最終MappingはFIP-010 / Presentation責務とする
+- `requestId`は`sending`中に発生した`sendFailed`（Pre-stream Failure）ではNullを許容する
+- `requestId`は`streaming`中に発生した`sendFailed`では必須とし、Active Request IDと一致しなければならない。不一致は`protocolViolation`とする
 
 ### 11.3 SendResultCertainty
 
@@ -420,11 +422,11 @@ Pure Reducerへ入力するApplication Eventは、Reducerが必要とする最�
 | `streamStarted` | `String requestId` | Active Request IDを設定して`streaming`へ遷移する。Request IDをReducerで生成・正規化しない |
 | `assistantDeltaReceived` | `String requestId`, `String delta` | Request ID一致を確認し、Temporary Textへdeltaをそのまま順序追加する。Canonical Messagesは変更しない |
 | `assistantCompleted` | `String requestId`, `List<Message> messages` | Request ID一致とTerminal未確定を確認し、Completed PayloadのCanonical MessagesをMergeして`ready`へ遷移する |
-| `sendFailed` | `ConversationFailure failure` | Terminal Failureを`sendFailed`へ反映する。Partial TextはCanonical化しない |
+| `sendFailed` | `ConversationFailure failure` | Terminal Failureを`sendFailed`へ反映する。Partial TextはCanonical化しない。`sending`中は`failure.requestId`のNullを許容し、`streaming`中は`failure.requestId`がActive Request IDと一致することを必須とする。不一致は`protocolViolation`とする |
 | `sendResultUnknown` | `ConversationFailure failure` | `resultCertainty=resultUnknown`を保持した`sendFailed`へ遷移し、Pending Sendを失わない |
-| `failureDismissed` | なし | FIP-010で定義された安全なDismiss条件を満たす場合だけ`ready`へ遷移する。ReducerはUI Actionを解釈しない |
+| `failureDismissed` | なし | `ready`が保持しているPagination Failureをclearする。`sendFailed`からのDismiss遷移はFIP-005で定義しない。具体的な安全Dismiss条件とState遷移はFIP-010の責務とする |
 | `historyReconciliationStarted` | なし | `initialLoading`へ遷移し、既存Canonical MessagesとPending Sendを保持する |
-| `historyReconciliationSucceeded` | `List<Message> canonicalMessages`, `ReconciliationSendResult sendResult` | 再取得HistoryをCanonical Stateへ反映する。送信結果が確認済みの場合だけPending SendをClearし`ready`へ遷移する |
+| `historyReconciliationSucceeded` | `List<Message> canonicalMessages`, `ReconciliationSendResult sendResult` | 再取得HistoryをCanonical Stateへ反映する。送信結果が確定完了（confirmedCompleted）の場合のみPending SendをClearし`ready`へ遷移する。確認できなかった場合（notConfirmed）はPending Sendを保持したまま`sendFailed`へ遷移する |
 | `historyReconciliationFailed` | `ConversationFailure failure` | 元のCanonical MessagesとPending Sendを保持し`sendFailed`へ戻す |
 
 ### 12.2 History Reconciliation Result
@@ -435,8 +437,8 @@ ReconciliationSendResult
 └── notConfirmed
 ```
 
-- `confirmedCompleted`: Reconciliationで対象Logical Sendの完了をCanonical Historyから確認できた状態。Pending SendをClearする。
-- `notConfirmed`: Reconciliationで対象Logical Sendの完了を確認できなかった状態。Pending Sendを維持し、FIP-010がSame-key Retry等の次のActionを判断する。
+- `confirmedCompleted`: Reconciliationで対象Logical Sendの完了をCanonical Historyから確認できた状態。Pending SendをClearし`ready`へ遷移する。
+- `notConfirmed`: Reconciliationで対象Logical Sendの完了を確認できなかった状態。Pending Sendを維持し、`sendFailed`へ遷移してFIP-010がSame-key Retry等の次のActionを判断する。
 - 具体的なMessage Identity判定、再取得回数、Retry UIおよびUser Action MappingはFIP-010で確定する。
 
 ### 12.3 Pagination Cursor Contract
@@ -454,9 +456,9 @@ Same-key RetryのI/O開始、History再取得、Retry Button、User Actionおよ
 ```mermaid
 stateDiagram-v2
     [*] --> initialLoading
-    initialLoading --> ready: load success / not found
+    initialLoading --> ready: load success / confirmed completed
     initialLoading --> initialLoadFailed: load failure
-    initialLoading --> sendFailed: reconciliation failure
+    initialLoading --> sendFailed: reconciliation failure / not confirmed
     initialLoadFailed --> initialLoading: user reload
     ready --> loadingOlder: load older
     loadingOlder --> ready: success or page failure
@@ -469,7 +471,6 @@ stateDiagram-v2
     streaming --> sendFailed: failure or result unknown
     sendFailed --> sending: allowed same-key retry
     sendFailed --> initialLoading: history reconciliation
-    sendFailed --> ready: reconciled or dismissed when safe
 ```
 
 ### 13.2 Reducer Result and Invalid Transition
@@ -528,7 +529,8 @@ HTTP Error、接続開始失敗等のPre-stream Failureでは、`sendStarted →
 - Request IDはInfrastructure / Backend Stream Boundaryから`streamStarted` EventのPayloadとして受け取る。
 - ReducerはRequest IDを生成、採番、正規化または置換しない。
 - `streamStarted`で`activeRequestId`を設定する。
-- 後続Delta / Completed / Failedの`requestId`はActive Requestと一致しなければならない。
+- `streaming`中に発生するDelta / Completed / Failedの`requestId`はActive Requestと一致しなければならない。
+- `sending`中（Active Request未設定）に発生するPre-stream`sendFailed`では`failure.requestId`はNullを許容する。
 - Request ID不一致は`protocolViolation`として`StateTransitionFailure`を返す。
 - Request IDをUIへ表示またはMetric Tagへ使用しない。
 - 必要な非機密Traceだけに使用し、ContentやKeyと組み合わせてLogしない。
@@ -807,26 +809,26 @@ flutter test
 
 ## 23. Acceptance Criteria
 
-- [ ] ApplicationがPlain DartでありFlutter / Riverpod / HTTP / JSONへ依存していない
-- [ ] `ConversationGateway`をApplication側が所有している
-- [ ] API DTOやSDK ExceptionをGateway Contractへ公開していない
-- [ ] 7つのScreen Statusだけを定義している
-- [ ] Canonical Messages、Temporary Text、Pending Sendを分離している
-- [ ] 一つのImmutable State Objectが画面状態のSource of Truthになっている
-- [ ] Status × Field Invariant Matrixで矛盾Stateを防いでいる
-- [ ] 全ConversationStateEventのPayloadとTransition Contractが定義されている
-- [ ] Reducerが`StateTransition` / `StateTransitionFailure`を返し、Invalid TransitionをSilent Ignoreしない
-- [ ] ReducerがPureかつ決定論的である
-- [ ] SSE Event順序、Request IDおよびTerminal Exactly Onceを検証している
-- [ ] Completed EventのCanonical Messageを正式結果としている
-- [ ] Partial TextをCanonical Messageとして確定していない
-- [ ] Message Mergeが順序維持、ID重複除外およびConflict検出を行う
-- [ ] Same-key RetryとSame-cursor RetryのInvariantを維持している
-- [ ] Automatic POST RetryまたはAutomatic Reconnectを追加していない
-- [ ] State、FailureおよびLogへSensitive Dataを露出していない
-- [ ] 新しいDependency、Riverpod Provider、HTTP AdapterまたはWidgetを追加していない
-- [ ] Phase 2〜4用Stateを先行追加していない
-- [ ] 対象Unit Test、`flutter analyze`および全Frontend Testが成功する
+- [x] ApplicationがPlain DartでありFlutter / Riverpod / HTTP / JSONへ依存していない
+- [x] `ConversationGateway`をApplication側が所有している
+- [x] API DTOやSDK ExceptionをGateway Contractへ公開していない
+- [x] 7つのScreen Statusだけを定義している
+- [x] Canonical Messages、Temporary Text、Pending Sendを分離している
+- [x] 一つのImmutable State Objectが画面状態のSource of Truthになっている
+- [x] Status × Field Invariant Matrixで矛盾Stateを防いでいる
+- [x] 全ConversationStateEventのPayloadとTransition Contractが定義されている
+- [x] Reducerが`StateTransition` / `StateTransitionFailure`を返し、Invalid TransitionをSilent Ignoreしない
+- [x] ReducerがPureかつ決定論的である
+- [x] SSE Event順序、Request IDおよびTerminal Exactly Onceを検証している
+- [x] Completed EventのCanonical Messageを正式結果としている
+- [x] Partial TextをCanonical Messageとして確定していない
+- [x] Message Mergeが順序維持、ID重複除外およびConflict検出を行う
+- [x] Same-key RetryとSame-cursor RetryのInvariantを維持している
+- [x] Automatic POST RetryまたはAutomatic Reconnectを追加していない
+- [x] State、FailureおよびLogへSensitive Dataを露出していない
+- [x] 新しいDependency、Riverpod Provider、HTTP AdapterまたはWidgetを追加していない
+- [x] Phase 2〜4用Stateを先行追加していない
+- [x] 対象Unit Test、`flutter analyze`および全Frontend Testが成功する
 
 ---
 
@@ -834,14 +836,14 @@ flutter test
 
 FIP-005 Implementationは次をすべて満たした時点で完了とする。
 
-1. 本DraftがCross-phase Review後に`Approved / Implementation Ready`へ昇格している
-2. FIP-003 / FIP-004 ImplementationがCompleted / Approvedである
-3. Acceptance Criteriaをすべて満たしている
-4. Reducer Unit Testが全Status、正常遷移、Invalid Transition、Request ID不一致、Cursor不一致およびTerminal重複を網羅している
-5. Code ReviewでDependency、State Invariant、SecurityおよびScopeを確認済みである
-6. Planned Commandsがすべて成功している
-7. 設計との差分がない、または差分が先にDesign / ADRへ反映されている
-8. FIP-008〜FIP-011が独自Stateを追加せず利用できるFoundationになっている
+1. [x] 本DraftがCross-phase Review後に`Approved / Implementation Ready`へ昇格している
+2. [x] FIP-003 / FIP-004 ImplementationがCompleted / Approvedである
+3. [x] Acceptance Criteriaをすべて満たしている
+4. [x] Reducer Unit Testが全Status、正常遷移、Invalid Transition、Request ID不一致、Cursor不一致およびTerminal重複を網羅している
+5. [x] Code ReviewでDependency、State Invariant、SecurityおよびScopeを確認済みである
+6. [x] Planned Commandsがすべて成功している
+7. [x] 設計との差分がない、または差分が先にDesign / ADRへ反映されている
+8. [x] FIP-008〜FIP-011が独自Stateを追加せず利用できるFoundationになっている
 
 Draft計画書作成完了は、FIP-005 Implementation完了を意味しない。
 
@@ -1004,12 +1006,14 @@ No redesign or corrective change is required from the cross-phase review.
 ### 29.4 Current Gate State
 
 ```text
-FIP-005 Document: Approved / Implementation Ready
+FIP-005 Document: Approved
 FIP-005 Planning: Completed
 Cross-phase Review: PASS
+Implementation Re-review: PASS
+G1 Gate: APPROVED
 Blocking Finding: 0
-Implementation: Not Started
+Implementation: Completed
 ```
 
-Implementation may proceed according to the approved FIP-005 implementation procedure and dependency order, subject to the project-level implementation gate.
+FIP-005 application state implementation has been completed and verified according to the approved implementation procedure.
 
