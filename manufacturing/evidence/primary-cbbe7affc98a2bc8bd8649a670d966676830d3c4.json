@@ -1,0 +1,124 @@
+{
+  "schema_version": "1",
+  "evidence_id": "primary-cbbe7affc98a2bc8bd8649a670d966676830d3c4",
+  "evidence_type": "PRIMARY",
+  "fip_id": "FIP-006",
+  "pipeline_step": "manufacturing-fip-006-implementation-commit",
+  "run_id": "run-fip006-20260913-001",
+  "created_at": "2026-09-12T18:31:06+0000",
+  "repository": {
+    "repository": "katoushodev-svg/ProjectAlice",
+    "branch": "fip-006/implementation",
+    "implementation_commit_sha": "cbbe7affc98a2bc8bd8649a670d966676830d3c4",
+    "base_sha": "0c5054cc71aa8725d466a9e93fa01db3daa95d6c",
+    "worktree_status": "clean",
+    "changed_files": [
+      "frontend/lib/app/alice_app.dart",
+      "frontend/lib/app/theme/alice_color_tokens.dart",
+      "frontend/lib/app/theme/alice_design_tokens.dart",
+      "frontend/lib/app/theme/alice_text_styles.dart",
+      "frontend/lib/app/theme/alice_theme.dart",
+      "frontend/lib/conversation/presentation/widget/alice_core/alice_core_assets.dart",
+      "frontend/lib/conversation/presentation/widget/alice_core/alice_core_glow_painter.dart",
+      "frontend/lib/conversation/presentation/widget/alice_core/alice_core_ring_painter.dart",
+      "frontend/lib/conversation/presentation/widget/alice_core/alice_core_view.dart",
+      "frontend/lib/conversation/presentation/widget/alice_core/alice_core_visual_state.dart",
+      "frontend/pubspec.yaml",
+      "frontend/test/app/theme/alice_theme_test.dart",
+      "frontend/test/conversation/presentation/widget/alice_core/alice_core_asset_test.dart",
+      "frontend/test/conversation/presentation/widget/alice_core/alice_core_golden_test.dart",
+      "frontend/test/conversation/presentation/widget/alice_core/alice_core_performance_test.dart",
+      "frontend/test/conversation/presentation/widget/alice_core/alice_core_view_test.dart",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_boundary_260.png",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_boundary_96.png",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_idle_180.png",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_reduce_motion_180.png",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_streaming_180.png",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_thinking_180.png",
+      "frontend/test/conversation/presentation/widget/alice_core/goldens/alice_core_unavailable_180.png"
+    ]
+  },
+  "manufacturing": {
+    "manifest_path": "scripts/manufacturing_manifest.json",
+    "approval_status": "Approved / Implementation Ready",
+    "prerequisite_result": "PASS",
+    "allowed_paths": [
+      "frontend/lib/app/theme/**",
+      "frontend/lib/app/alice_app.dart",
+      "frontend/lib/conversation/presentation/widget/alice_core/**",
+      "frontend/test/app/theme/**",
+      "frontend/test/conversation/presentation/widget/alice_core/**",
+      "frontend/pubspec.yaml"
+    ],
+    "prohibited_changes": [
+      "design",
+      "architecture",
+      "api_contract",
+      "database",
+      "security_safety",
+      "phase_boundary",
+      "fip_scope",
+      "unknown_changes",
+      "new_dependency"
+    ],
+    "required_checks": [
+      "implementation",
+      "focused_test",
+      "analyze",
+      "full_regression",
+      "auto_fix",
+      "retest"
+    ],
+    "manufacturing_result": "PASS",
+    "manufacturing_reason": "FIP-006 Manufacturing PASS candidate was successfully validated."
+  },
+  "verification": {
+    "implementation": {
+      "status": "PASS",
+      "summary": "FIP-006 Visual Foundation implementation completed within approved scope."
+    },
+    "focused_test": {
+      "status": "PASS",
+      "summary": "FIP-006 focused Flutter test suite passed: 34 tests."
+    },
+    "analyze": {
+      "status": "PASS",
+      "summary": "flutter analyze passed."
+    },
+    "full_regression": {
+      "status": "PASS",
+      "summary": "Full Flutter test suite passed: 104 tests."
+    },
+    "auto_fix": {
+      "status": "PASS",
+      "summary": "Implementation review findings were fixed before final retest."
+    },
+    "retest": {
+      "status": "PASS",
+      "summary": "Retest passed after implementation review fixes."
+    }
+  },
+  "reviews": {
+    "design_review": {
+      "conclusion": "PASS",
+      "evidence": "FIP-006 approved design scope and Phase 1 boundaries were confirmed.",
+      "reviewed_commit_sha": "cbbe7affc98a2bc8bd8649a670d966676830d3c4"
+    },
+    "implementation_review": {
+      "conclusion": "PASS",
+      "evidence": "Implementation review passed after identified findings were fixed and retested.",
+      "reviewed_commit_sha": "cbbe7affc98a2bc8bd8649a670d966676830d3c4"
+    },
+    "re_review": {
+      "conclusion": "PASS",
+      "evidence": "Final re-review passed with tests, analyze, and scope compliance confirmed.",
+      "reviewed_commit_sha": "cbbe7affc98a2bc8bd8649a670d966676830d3c4"
+    }
+  },
+  "outcome": {
+    "status": "PASS",
+    "human_gate": false,
+    "unknown": false,
+    "stop_reason": "Recorded after Manufacturing PASS and before Evidence Commit; awaiting Push, Remote Verification, Pull Request, and G1 Human Decision."
+  }
+}
