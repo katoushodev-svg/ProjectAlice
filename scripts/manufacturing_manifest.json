@@ -2,7 +2,12 @@
   "FIP-005": {
     "approval_status": "Approved / Implementation Ready",
     "plan": "docs/fip-005-application-state-plan.md",
-    "prerequisites": ["FIP-001", "FIP-002", "FIP-003", "FIP-004"],
+    "prerequisites": [
+      "FIP-001",
+      "FIP-002",
+      "FIP-003",
+      "FIP-004"
+    ],
     "prohibited_changes": [
       "design",
       "architecture",
@@ -69,6 +74,47 @@
       "frontend/test/app/theme/**",
       "frontend/test/conversation/presentation/widget/alice_core/**",
       "frontend/pubspec.yaml"
+    ]
+  },
+  "FIP-007": {
+    "approval_status": "Approved / Implementation Ready",
+    "plan": "docs/fip-007-screen-shell-plan.md",
+    "prerequisites": [
+      "FIP-001",
+      "FIP-002",
+      "FIP-003",
+      "FIP-004",
+      "FIP-005",
+      "FIP-006"
+    ],
+    "prohibited_changes": [
+      "design",
+      "architecture",
+      "api_contract",
+      "database",
+      "security_safety",
+      "phase_boundary",
+      "fip_scope",
+      "unknown_changes",
+      "new_dependency"
+    ],
+    "required_checks": [
+      "implementation",
+      "focused_test",
+      "analyze",
+      "full_regression",
+      "ai_review",
+      "retest",
+      "rereview"
+    ],
+    "review_policy": "PASS requires evidence and explicit review conclusion",
+    "run_budget": 2,
+    "allowed_paths": [
+      "frontend/lib/conversation/presentation/layout/**",
+      "frontend/lib/conversation/presentation/screen/**",
+      "frontend/lib/conversation/presentation/widget/**",
+      "frontend/test/conversation/presentation/screen/**",
+      "frontend/test/conversation/presentation/widget/**"
     ]
   }
 }
