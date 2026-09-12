@@ -25,7 +25,7 @@
 
 | 観点 | 現在地 | 製造完了までの残り |
 |---|---|---|
-| Phase 1 Conversation | FIP-001〜004完了、FIP-005実装中、FIP-006〜012未実装 | FIP-005の完了判定、FIP-006〜012、Phase 1レビュー・テスト・統合判定 |
+| Phase 1 Conversation | FIP-001〜005完了、FIP-006〜012未実装 | FIP-006〜012、Phase 1レビュー・テスト・統合判定 |
 | Phase 2 Personal Memory | 設計完了、製造未着手 | 正式な製造単位に沿う実装、レビュー、テスト、Phase統合判定 |
 | Phase 3 Tools / External Services | 設計完了、製造未着手 | 正式な製造単位に沿う実装、レビュー、テスト、Phase統合判定 |
 | Phase 4 Agent / PC / Browser / Application / Voice | 設計完了、製造未着手 | 正式な製造単位に沿う実装、レビュー、テスト、Phase統合判定 |
@@ -33,14 +33,14 @@
 
 **全体進捗率（概算）:** **数値未設定**。現在の正式資料にはPhase 2〜4および統合・最終検証の製造単位数・工数・重みがないため、FIP数だけで算出する数値はProject Alice全体の進捗を誤って表す。数値を設定する場合は、各Phaseと統合・最終検証を含む重みを承認してから「概算」として記録する。
 
-参考指標として、**Phase 1のFIP着手済み比率は 5/12（約42%）**、**完了比率は 4/12（約33%）**である。これは全体進捗率ではない。
+参考指標として、**Phase 1のFIP着手済み比率は 5/12（約42%）**、**完了比率は 5/12（約42%）**である。これは全体進捗率ではない。
 
 ## 3. マスタースケジュール／進捗管理表
 
 | 順序 | 管理対象 | 目的・完了条件（資料記載の範囲） | 現在状態 | 依存関係・開始条件 | 次の判定／残工程 |
 |---:|---|---|---|---|---|
 | 0 | Phase 0 設計・基盤構築 | 設計、Phase間整合性確認、Final Design Reviewを完了し、実装を承認する。 | ✅ 完了 | — | Phase 1〜4の製造は承認済み設計に従う。 |
-| 1 | Phase 1 Conversation | 自然で一貫した会話、AI Provider連携、Conversation Historyの保存・参照、Alice人格設定、基本応答を成立させる。 | 🔵 製造中 | Phase 0完了。FIPは後述の順序で管理する。 | FIP-005完了後、FIP-006〜012を順次実施し、Phase 1品質ゲートへ進む。 |
+| 1 | Phase 1 Conversation | 自然で一貫した会話、AI Provider連携、Conversation Historyの保存・参照、Alice人格設定、基本応答を成立させる。 | 🔵 製造中 | Phase 0完了。FIPは後述の順序で管理する。 | FIP-006〜012を順次実施し、Phase 1品質ゲートへ進む。 |
 | 2 | Phase 2 Personal Memory | ユーザー管理可能なMemoryの保存・更新・参照・削除を通じ、ユーザーに合わせた回答を可能にする。 | ⚪ 設計完了／製造未着手 | Phase 1のConversation Historyとの責務分離を維持する。MemoryはPermission、Approval、Execution Authorityの代替にしない。 | 正式な製造計画に基づく実装開始、レビュー、テスト、Phase統合判定。 |
 | 3 | Phase 3 Tools / External Services | 外部サービスの情報取得・利用を安全に拡張し、初期優先ConnectorとしてApple Calendarを利用可能にする。 | ⚪ 設計完了／製造未着手 | Tool SelectionとApprovalを分離する。外部サービス連携は限定的で明確なConnector/APIを利用する。 | 正式な製造計画に基づく実装開始、レビュー、テスト、Phase統合判定。 |
 | 4 | Phase 4 Agent / PC / Browser / Application / Voice | Goal理解からPlan、Execute、Observe、EvaluateまでのAgent Cycleと、PC・Browser・Application・Voiceの一貫した体験を実現する。 | ⚪ 設計完了／製造未着手 | Goal／AI ProposalはExecution Authorityではない。Memory、Permission、Approval、Risk、Execution Authorityを分離する。 | 正式な製造計画に基づく実装開始、レビュー、テスト、Phase統合判定。 |
@@ -57,7 +57,7 @@
 | FIP-002 | ✅ 完了 | 完了 | FIP-001後の先行工程 | 同上。 |
 | FIP-003 | ✅ 完了 | 完了 | FIP-001・002を前提とするDomain Foundation | Domain境界が後続実装で崩れないことを継続確認する。 |
 | FIP-004 | ✅ 完了 | 完了 | FIP-003後の後続工程 | 完了根拠を維持し、後続への影響がないかPhase 1統合時に確認する。 |
-| FIP-005 | 🔵 実装中 | GitHub Copilot実装中 | FIP-001〜004完了後 | 実装完了後に、承認済み計画に対するレビューと必要なテストを実施して完了判定する。 |
+| FIP-005 | ✅ 完了 | 完了 | FIP-001〜004完了後 | 完了根拠を維持し、後続への影響がないかPhase 1統合時に確認する。 |
 | FIP-006 | ⚪ 未実装 | 未着手 | FIP-005完了後に開始判定 | FIP-005の完了判定後、承認済み計画に従い開始する。 |
 | FIP-007 | ⚪ 未実装 | 未着手 | FIP-006を含む先行FIPの完了後に開始判定 | 先行FIPの完了判定後に開始する。 |
 | FIP-008 | ⚪ 未実装 | 未着手 | FIP-007を含む先行FIPの完了後に開始判定 | 先行FIPの完了判定後に開始する。 |
@@ -69,7 +69,7 @@
 ### Phase 1の製造順序と依存関係
 
 ```text
-FIP-001 ✅ → FIP-002 ✅ → FIP-003 ✅ → FIP-004 ✅ → FIP-005 🔵
+FIP-001 ✅ → FIP-002 ✅ → FIP-003 ✅ → FIP-004 ✅ → FIP-005 ✅
                                                         ↓
 FIP-006 ⚪ → FIP-007 ⚪ → FIP-008 ⚪ → FIP-009 ⚪ → FIP-010 ⚪ → FIP-011 ⚪ → FIP-012 ⚪
                                                                                               ↓
@@ -90,7 +90,7 @@ FIP-006 ⚪ → FIP-007 ⚪ → FIP-008 ⚪ → FIP-009 ⚪ → FIP-010 ⚪ → 
 
 | ゲート | 対象 | 通過条件 | 現在状態 | 前提 | 証跡／判定記録 |
 |---|---|---|---|---|---|
-| G1: FIP完了判定 | 各FIP | 承認済み計画のスコープを実装し、必要なレビューとテストを完了する。 | Phase 1はFIP-001〜004通過、FIP-005判定待ち。Phase 2〜4は未着手。 | 当該FIPの実装完了 | 対応FIP計画、レビュー結果、テスト結果 |
+| G1: FIP完了判定 | 各FIP | 承認済み計画のスコープを実装し、必要なレビューとテストを完了する。 | Phase 1はFIP-001〜005通過。Phase 2〜4は未着手。 | 当該FIPの実装完了 | 対応FIP計画、レビュー結果、テスト結果 |
 | G2: Phase品質ゲート | Phase 1〜4 | 当該Phaseの製造項目を完了し、要件・責務境界・必要テストを満たす。 | Phase 1〜4とも未通過 | 当該Phaseの全FIP／正式製造単位のG1通過 | Phaseレビュー記録、テスト結果、残課題一覧 |
 | G3: Cross-Phase Integration | Phase 1〜4間 | Conversation、Memory、Tools、Agentの境界と連携が正式設計と整合する。 | ⏳ 未着手 | G2を全Phaseで通過 | 統合レビュー記録、統合テスト結果 |
 | G4: E2E | Project Alice全体 | ユーザー体験として各Phaseを通る主要な一連の動作を確認する。 | ⏳ 未着手 | G3通過 | E2Eテスト結果 |

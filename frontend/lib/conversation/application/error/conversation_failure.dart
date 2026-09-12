@@ -27,24 +27,12 @@ final class ConversationFailure {
     required this.operation,
     this.resultCertainty,
     this.requestId,
-    this.retryAfter,
-  }) {
-    final validRetryAfter =
-        category == ConversationFailureCategory.requestInProgress
-        ? retryAfter != null
-        : retryAfter == null;
-    if (!validRetryAfter) {
-      throw ArgumentError(
-        'retryAfter is only valid for requestInProgress failures.',
-      );
-    }
-  }
+  });
 
   final ConversationFailureCategory category;
   final ConversationOperation operation;
   final SendResultCertainty? resultCertainty;
   final String? requestId;
-  final Duration? retryAfter;
 
   @override
   bool operator ==(Object other) {
@@ -52,13 +40,12 @@ final class ConversationFailure {
         other.category == category &&
         other.operation == operation &&
         other.resultCertainty == resultCertainty &&
-        other.requestId == requestId &&
-        other.retryAfter == retryAfter;
+        other.requestId == requestId;
   }
 
   @override
   int get hashCode =>
-      Object.hash(category, operation, resultCertainty, requestId, retryAfter);
+      Object.hash(category, operation, resultCertainty, requestId);
 
   @override
   String toString() => 'ConversationFailure($category, $operation)';

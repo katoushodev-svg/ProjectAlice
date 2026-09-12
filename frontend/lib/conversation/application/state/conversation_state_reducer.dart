@@ -266,6 +266,11 @@ final class ConversationStateReducer {
         failure.operation != ConversationOperation.send) {
       return _invalid(ConversationOperation.send);
     }
+    // In `streaming`, requestId must be set and match the active request.
+    if (state.status == ConversationScreenStatus.streaming &&
+        failure.requestId != state.activeRequestId) {
+      return _protocol(ConversationOperation.send);
+    }
     final keepPending =
         retainPending ||
         failure.resultCertainty == SendResultCertainty.resultUnknown;
@@ -282,23 +287,13 @@ final class ConversationStateReducer {
     );
   }
 
+  // sendFailed dismissal policy is FIP-010's responsibility; not defined here.
   ConversationStateReducerResult _dismiss(ConversationScreenState state) {
     if (state.status == ConversationScreenStatus.ready &&
         state.failure != null) {
       return StateTransition(state.copyWith(failure: null));
     }
-    if (state.status != ConversationScreenStatus.sendFailed ||
-        state.pendingSend != null) {
-      return _invalid(ConversationOperation.send);
-    }
-    return StateTransition(
-      ConversationScreenState.fromReducer(
-        status: ConversationScreenStatus.ready,
-        conversation: state.conversation,
-        messages: state.messages,
-        pagination: state.pagination,
-      ),
-    );
+    return _invalid(ConversationOperation.send);
   }
 
   ConversationStateReducerResult _reconcileStart(
@@ -325,16 +320,29 @@ final class ConversationStateReducer {
     if (state.status != ConversationScreenStatus.initialLoading) {
       return _invalid(ConversationOperation.reconciliation);
     }
+    if (event.sendResult == ReconciliationSendResult.confirmedCompleted) {
+      return StateTransition(
+        ConversationScreenState.fromReducer(
+          status: ConversationScreenStatus.ready,
+          conversation: state.conversation,
+          messages: event.canonicalMessages,
+          pagination: state.pagination,
+          pendingSend: null,
+        ),
+      );
+    }
     return StateTransition(
       ConversationScreenState.fromReducer(
-        status: ConversationScreenStatus.ready,
+        status: ConversationScreenStatus.sendFailed,
         conversation: state.conversation,
         messages: event.canonicalMessages,
         pagination: state.pagination,
-        pendingSend:
-            event.sendResult == ReconciliationSendResult.confirmedCompleted
-            ? null
-            : state.pendingSend,
+        pendingSend: state.pendingSend,
+        failure: ConversationFailure(
+          category: ConversationFailureCategory.resultUnknown,
+          operation: ConversationOperation.reconciliation,
+          resultCertainty: SendResultCertainty.resultUnknown,
+        ),
       ),
     );
   }

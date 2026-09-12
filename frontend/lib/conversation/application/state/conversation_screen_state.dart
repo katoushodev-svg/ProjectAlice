@@ -168,7 +168,8 @@ final class ConversationScreenState {
         }
       case ConversationScreenStatus.sendFailed:
         if (failure == null ||
-            failure!.operation != ConversationOperation.send) {
+            (failure!.operation != ConversationOperation.send &&
+                failure!.operation != ConversationOperation.reconciliation)) {
           throw ArgumentError('Send failure is required.');
         }
         if (activeRequestId != null) {
