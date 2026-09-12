@@ -13,7 +13,19 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from manufacturing import ManufacturingGateError, build_candidate
+from manufacturing_coding_agent_adapter import SubprocessCodingAgentAdapter
 from manufacturing_evidence import EvidenceStore, EvidenceValidationError
+from manufacturing_executor import (
+    DEFAULT_PROHIBITED_CHANGES,
+    ExecutorSecurityError,
+    ExecutorValidationError,
+    ImplementationJob,
+    ImplementationResult,
+    ManufacturingExecutor,
+    STATUS_FAILURE,
+    STATUS_SUCCESS,
+    STATUS_UNKNOWN,
+)
 from manufacturing_git import ManufacturingGitAutomation
 
 
@@ -76,16 +88,27 @@ class ManufacturingRuntime:
         self,
         manifest: Mapping[str, Any],
         *,
+        executor: ManufacturingExecutor | None = None,
         git_layer: Any | None = None,
         evidence_store: EvidenceStore | None = None,
         lock_path: Path = Path("manufacturing/.runtime.lock"),
         evidence_factory: EvidenceFactory | None = None,
     ):
         self.manifest = dict(manifest)
+        self.executor = executor or ManufacturingExecutor(
+            adapter=SubprocessCodingAgentAdapter.from_environment(),
+            manifest=self.manifest,
+        )
         self.git_layer = git_layer or ManufacturingGitAutomation()
         self.evidence_store = evidence_store or EvidenceStore(Path("manufacturing/evidence"))
         self.lock_path = lock_path
         self.evidence_factory = evidence_factory
+
+    def execute_implementation(
+        self, job: ImplementationJob | Mapping[str, Any]
+    ) -> ImplementationResult:
+        """Execute an ImplementationJob via the configured ManufacturingExecutor."""
+        return self.executor.execute_job(job)
 
     def run(self, job: Mapping[str, Any]) -> RuntimeResult:
         run_id = self._new_run_id()
@@ -103,6 +126,44 @@ class ManufacturingRuntime:
             except ManufacturingGateError as error:
                 return self._escalate(history, run_id, str(error))
             self._transition(history, IMPLEMENTING)
+
+            impl_job_data = job.get("implementation_job")
+            if impl_job_data is None and "source_of_truth" in job and "allowed_paths" in job:
+                impl_job_data = {
+                    "fip": job.get("fip") or record.get("fip"),
+                    "run_id": run_id,
+                    "source_of_truth": job.get("source_of_truth"),
+                    "allowed_paths": job.get("allowed_paths"),
+                    "prohibited_changes": job.get("prohibited_changes", DEFAULT_PROHIBITED_CHANGES),
+                    "prompt": job.get("prompt", ""),
+                    "context": job.get("context"),
+                }
+
+            if impl_job_data is not None:
+                if isinstance(impl_job_data, Mapping):
+                    impl_job_payload = dict(impl_job_data)
+                    impl_job_payload.setdefault("fip", job.get("fip") or record.get("fip"))
+                    impl_job_payload.setdefault("run_id", run_id)
+                elif isinstance(impl_job_data, ImplementationJob):
+                    impl_job_payload = impl_job_data
+                else:
+                    return self._escalate(history, run_id, "invalid implementation_job format")
+
+                try:
+                    impl_result = self.executor.execute_job(impl_job_payload)
+                except (ExecutorValidationError, ExecutorSecurityError) as error:
+                    return self._escalate(history, run_id, f"Implementation validation failed: {error}")
+                except Exception as error:
+                    return self._escalate(history, run_id, f"Implementation state is unknown: {error}", unknown=True)
+
+                if impl_result.status != STATUS_SUCCESS:
+                    return self._escalate(
+                        history,
+                        run_id,
+                        f"Implementation failed: {impl_result.reason}",
+                        unknown=impl_result.unknown or (impl_result.status == STATUS_UNKNOWN),
+                    )
+
             self._transition(history, TESTING)
             self._transition(history, REVIEW)
             try:
