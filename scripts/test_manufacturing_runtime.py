@@ -27,10 +27,13 @@ from manufacturing_executor import (  # noqa: E402
 )
 from manufacturing_git import (  # noqa: E402
     EvidenceCommitResult,
+    ImplementationCommitResult,
     PullRequestResult,
     PushResult,
+    RepositoryPreflight,
     RemoteVerificationResult,
 )
+from manufacturing_verification import CheckResult, ReviewResult  # noqa: E402
 from manufacturing_runtime import (  # noqa: E402
     EVIDENCE_COMMIT,
     ESCALATED,
@@ -405,6 +408,134 @@ class RuntimeExecutorCodexIntegrationTest(unittest.TestCase):
             res = runtime.run(job_payload)
         self.assertEqual(res.state, G1_HANDOFF)
         self.assertIn(IMPLEMENTING, res.history)
+
+
+class AutonomousRuntimeTest(unittest.TestCase):
+    class Adapter(CodingExecutor):
+        def __init__(self): self.calls = 0
+        def execute(self, job):
+            self.calls += 1
+            return ImplementationResult(STATUS_SUCCESS, job.fip, job.run_id, "ok", ("frontend/lib/conversation/presentation/screen/shell.dart",), "implemented")
+
+    class Verification:
+        def __init__(self, reviews, unknown=False): self.reviews = list(reviews); self.unknown = unknown
+        def focused_test(self): return CheckResult("UNKNOWN" if self.unknown else "PASS", "focused")
+        def analyze(self): return CheckResult("PASS", "analyze")
+        def full_regression(self): return CheckResult("PASS", "regression")
+        def review(self, prompt): return self.reviews.pop(0)
+
+    class Git:
+        def __init__(self, commit="SUCCESS", pr="SUCCESS"):
+            self.commit_status, self.pr_status, self.calls = commit, pr, []
+        def preflight(self, branch): self.calls.append("preflight"); return RepositoryPreflight("PASS", "ok", branch, "base", "base", "origin")
+        def verify_prerequisite(self, fip, sha, completion_evidence=None): self.calls.append("prerequisite");
+        def commit_implementation(self, *args): self.calls.append("commit_implementation"); return ImplementationCommitResult(self.commit_status, "commit_implementation", "forced", args[0], args[1], "implementation-sha")
+        def commit_evidence(self, *args): self.calls.append("commit_evidence"); return EvidenceCommitResult("SUCCESS", "commit_evidence", "ok", args[0]["run_id"], args[2], "implementation-sha", "evidence-sha", args[1][0])
+        def push(self, run_id, branch, *args, **kwargs): self.calls.append("push"); return PushResult("SUCCESS", "push", "ok", run_id, branch, "evidence-sha")
+        def verify_remote(self, pushed, **kwargs): self.calls.append("remote"); return RemoteVerificationResult("SUCCESS", "remote", "ok", pushed.run_id, pushed.branch, pushed.branch, "evidence-sha", pushed.branch, "evidence-sha")
+        def create_pull_request(self, remote, **kwargs): self.calls.append("pr"); return PullRequestResult(self.pr_status, "pr", "forced", remote.run_id, remote.branch, "https://github.com/example/repo/pull/1")
+
+    def make_runtime(self, reviews, *, commit="SUCCESS", pr="SUCCESS", unknown=False, verify_prerequisite=None):
+        git = self.Git(commit, pr)
+        # Bind a PASS result method without giving the Runtime any Git subprocess.
+        from manufacturing_git import PrerequisiteResult
+        git.verify_prerequisite = verify_prerequisite or (lambda fip, sha, completion_evidence=None: PrerequisiteResult("PASS", fip, "ok", sha))
+        adapter = self.Adapter()
+        evidence = FakeEvidenceStore(Path(tempfile.mkdtemp()))
+        return ManufacturingRuntime(MANIFEST, executor=ManufacturingExecutor(adapter=adapter, manifest=MANIFEST), git_layer=git, evidence_store=evidence, verification=self.Verification(reviews, unknown), lock_path=evidence.directory / ".lock"), git, adapter, evidence
+
+    def test_autonomous_pass_connects_all_stages(self):
+        review = ReviewResult("PASS", "reviewed", "none", "manifest", False)
+        runtime, git, adapter, evidence = self.make_runtime([review])
+        result = runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"})
+        self.assertEqual(result.state, G1_HANDOFF); self.assertEqual(adapter.calls, 1)
+        self.assertEqual(git.calls, ["preflight", "commit_implementation", "commit_evidence", "push", "remote", "pr"])
+        self.assertEqual(evidence.writes[0]["repository"]["implementation_commit_sha"], "implementation-sha")
+
+    def test_fixable_is_bounded_and_records_actual_attempts(self):
+        fix = ReviewResult("FIXABLE_FINDINGS", "fix", "low", "manifest", True)
+        passed = ReviewResult("PASS", "reviewed", "none", "manifest", False)
+        runtime, _, adapter, evidence = self.make_runtime([fix, passed])
+        self.assertEqual(runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"}).state, G1_HANDOFF)
+        self.assertEqual(adapter.calls, 2); self.assertEqual(evidence.writes[0]["verification"]["retest"]["status"], "PASS")
+        record = runtime._build_record("FIP-007", "r", "fip-007/implementation", MANIFEST["FIP-007"], {f: "PASS" for f in MANIFEST["FIP-007"]["prerequisites"]}, ["frontend/lib/conversation/presentation/screen/shell.dart"], {name: {"status": "PASS", "summary": "ok", "conclusion": "PASS", "evidence": "ok", "severity": "none", "allowed_scope": "manifest", "retest_required": False} for name in ("implementation", "focused_test", "analyze", "full_regression", "ai_review", "retest", "rereview")}, 2)
+        self.assertTrue(record["auto_fix"]["required"]); self.assertEqual(record["auto_fix"]["attempts"], 2)
+
+    def test_second_fixable_unknown_commit_and_pr_failure_stop(self):
+        fix = ReviewResult("FIXABLE_FINDINGS", "fix", "low", "manifest", True)
+        runtime, git, adapter, _ = self.make_runtime([fix, fix])
+        self.assertEqual(runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"}).state, ESCALATED); self.assertEqual(adapter.calls, 2); self.assertNotIn("commit_implementation", git.calls)
+        runtime, git, _, _ = self.make_runtime([ReviewResult("PASS", "ok", "none", "manifest", False)], commit="UNKNOWN")
+        self.assertEqual(runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"}).state, ESCALATED); self.assertNotIn("commit_evidence", git.calls)
+        runtime, git, _, _ = self.make_runtime([ReviewResult("PASS", "ok", "none", "manifest", False)], pr="FAILURE")
+        result = runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"}); self.assertEqual(result.state, ESCALATED); self.assertNotIn("PR_CREATED", result.history)
+
+    def test_verification_unknown_does_not_retry_or_stage_records(self):
+        runtime, git, adapter, _ = self.make_runtime([ReviewResult("PASS", "ok", "none", "manifest", False)], unknown=True)
+        result = runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"})
+        self.assertTrue(result.unknown); self.assertEqual(adapter.calls, 1); self.assertEqual(git.calls, ["preflight"])
+
+    # FIP-007 review BLOCKER: prerequisite verification must actually run
+    # against Git history for every manifest prerequisite, not a blanket mock.
+
+    def test_prerequisite_gate_verifies_every_manifest_prerequisite(self):
+        from manufacturing_git import PrerequisiteResult
+        seen = []
+
+        def verify(fip, sha, completion_evidence=None):
+            seen.append(fip)
+            return PrerequisiteResult("PASS", fip, "ok", sha)
+
+        review = ReviewResult("PASS", "reviewed", "none", "manifest", False)
+        runtime, git, adapter, evidence = self.make_runtime([review], verify_prerequisite=verify)
+        result = runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"})
+        self.assertEqual(result.state, G1_HANDOFF)
+        self.assertEqual(seen, list(MANIFEST["FIP-007"]["prerequisites"]))
+
+    def test_prerequisite_failure_escalates_before_implementation(self):
+        # Any single failing prerequisite (unregistered proof, invalid SHA,
+        # unconfirmed completion evidence, etc.) must block before the Coding
+        # Executor runs, regardless of which prerequisite failed.
+        from manufacturing_git import PrerequisiteResult
+
+        def verify(fip, sha, completion_evidence=None):
+            if fip == "FIP-002":
+                return PrerequisiteResult("ESCALATE", fip, "completion evidence does not confirm FIP is Completed / Approved", sha)
+            return PrerequisiteResult("PASS", fip, "ok", sha)
+
+        review = ReviewResult("PASS", "reviewed", "none", "manifest", False)
+        runtime, git, adapter, evidence = self.make_runtime([review], verify_prerequisite=verify)
+        result = runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"})
+        self.assertEqual(result.state, ESCALATED)
+        self.assertFalse(result.unknown)
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(git.calls, ["preflight"])
+
+    def test_unknown_prerequisite_git_result_marks_runtime_unknown(self):
+        from manufacturing_git import PrerequisiteResult
+
+        def verify(fip, sha, completion_evidence=None):
+            if fip == "FIP-004":
+                return PrerequisiteResult("UNKNOWN", fip, "main reachability could not be verified", sha)
+            return PrerequisiteResult("PASS", fip, "ok", sha)
+
+        review = ReviewResult("PASS", "reviewed", "none", "manifest", False)
+        runtime, git, adapter, evidence = self.make_runtime([review], verify_prerequisite=verify)
+        result = runtime.run({"fip": "FIP-007", "branch": "fip-007/implementation"})
+        self.assertEqual(result.state, ESCALATED)
+        self.assertTrue(result.unknown)
+        self.assertEqual(adapter.calls, 0)
+
+
+class ProductionPrerequisiteProofTest(unittest.TestCase):
+    """Integration check against real Git history: the production proof map in
+    _prerequisite_gates() must verify PASS for every FIP-007 prerequisite,
+    including FIP-001 / FIP-002 via Source of Truth completion evidence."""
+
+    def test_all_fip_007_prerequisites_pass_against_real_repository(self):
+        runtime = ManufacturingRuntime(MANIFEST)
+        gates = runtime._prerequisite_gates(MANIFEST["FIP-007"]["prerequisites"])
+        self.assertEqual(gates, {fip: "PASS" for fip in MANIFEST["FIP-007"]["prerequisites"]})
 
 
 if __name__ == "__main__":

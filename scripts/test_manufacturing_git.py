@@ -734,5 +734,168 @@ class StagedGitApiTest(unittest.TestCase):
         self.assertEqual(result.status, "UNKNOWN")
 
 
+class ImplementationCommitSafetyTest(unittest.TestCase):
+    def test_exact_path_commit_and_records_rejection(self):
+        commands = []
+        reads = {"head": 0}
+        def runner(arguments):
+            command = tuple(arguments); commands.append(command)
+            if command == ("git", "branch", "--show-current"): return CommandResult(0, "fip-007/implementation\n")
+            if command == ("git", "rev-parse", "HEAD"):
+                reads["head"] += 1; return CommandResult(0, "base-sha\n" if reads["head"] == 1 else "commit-sha\n")
+            if command == ("git", "rev-parse", "HEAD^"): return CommandResult(0, "base-sha\n")
+            if command == ("git", "status", "--porcelain", "--untracked-files=all"): return CommandResult(0, " M frontend/lib/conversation/presentation/screen/shell.dart\n")
+            if command == ("git", "show", "--format=", "--name-only", "commit-sha"): return CommandResult(0, "frontend/lib/conversation/presentation/screen/shell.dart\n")
+            return CommandResult(0)
+        result = ManufacturingGitAutomation(runner).commit_implementation("run", "fip-007/implementation", "base-sha", ["frontend/lib/conversation/presentation/screen/shell.dart"], ["frontend/lib/conversation/presentation/screen/**"], "feat(fip-007): implement screen shell")
+        self.assertEqual(result.status, "SUCCESS")
+        self.assertIn(("git", "add", "--", "frontend/lib/conversation/presentation/screen/shell.dart"), commands)
+        self.assertNotIn(("git", "add", "."), commands); self.assertNotIn(("git", "add", "-A"), commands)
+        rejected = ManufacturingGitAutomation(runner).commit_implementation("run", "fip-007/implementation", "base-sha", ["manufacturing/records/fip-006.json"], ["frontend/**"], "message")
+        self.assertEqual(rejected.status, "FAILURE")
+
+class VerifyPrerequisiteTest(unittest.TestCase):
+    """FIP-007 review BLOCKER: prerequisite verification must independently
+    prove each prerequisite is a real, main-reachable, FIP-identified commit."""
+
+    SHA = "4dfbbb5602b51318ca643e115bb50116a877952d"
+
+    def _fake(self, *, is_ancestor: int = 0, subject: str = "FIP-003完了"):
+        return FakeGit(
+            {
+                ("git", "cat-file", "-e", f"{self.SHA}^{{commit}}"): CommandResult(0),
+                ("git", "merge-base", "--is-ancestor", self.SHA, "main"): CommandResult(is_ancestor),
+                ("git", "show", "-s", "--format=%s", self.SHA): CommandResult(0, subject + "\n"),
+            }
+        )
+
+    def test_real_ancestor_commit_with_identified_subject_passes(self):
+        fake = self._fake()
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-003", self.SHA)
+        self.assertEqual(result.status, "PASS")
+        self.assertIn(("git", "merge-base", "--is-ancestor", self.SHA, "main"), fake.commands)
+
+    def test_unregistered_prerequisite_with_empty_sha_escalates(self):
+        # Mirrors _prerequisite_gates() calling verify_prerequisite with "" for
+        # any FIP without a registered proof entry.
+        fake = FakeGit({})
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-009", "")
+        self.assertEqual(result.status, "ESCALATE")
+        self.assertEqual(fake.commands, [])
+
+    def test_malformed_sha_escalates(self):
+        fake = FakeGit({})
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", "not-a-sha")
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_commit_not_reachable_from_main_escalates(self):
+        fake = self._fake(is_ancestor=1)
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-003", self.SHA)
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_commit_does_not_exist_escalates(self):
+        fake = FakeGit(
+            {("git", "cat-file", "-e", f"{self.SHA}^{{commit}}"): CommandResult(1, stderr="bad object")}
+        )
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-003", self.SHA)
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_subject_without_fip_identifier_escalates(self):
+        fake = self._fake(subject="docs: complete Phase 1 frontend implementation plans")
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA)
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_merge_base_unknown_returncode_is_unknown(self):
+        fake = FakeGit(
+            {
+                ("git", "cat-file", "-e", f"{self.SHA}^{{commit}}"): CommandResult(0),
+                ("git", "merge-base", "--is-ancestor", self.SHA, "main"): CommandResult(128, stderr="fatal"),
+            }
+        )
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-003", self.SHA)
+        self.assertEqual(result.status, "UNKNOWN")
+
+    def test_git_command_raising_unknown_is_unknown(self):
+        def runner(_arguments):
+            raise GitResultUnknown("git result unknown")
+
+        result = ManufacturingGitAutomation(runner).verify_prerequisite("FIP-003", self.SHA)
+        self.assertEqual(result.status, "UNKNOWN")
+
+
+class VerifyPrerequisiteWithCompletionEvidenceTest(unittest.TestCase):
+    """FIP-001 / FIP-002 are bundled into a commit whose subject does not name
+    either FIP individually; a Source of Truth document at that commit's tree
+    is required as an explicit, verifiable substitute for the subject check."""
+
+    SHA = "38b618238b64caccf58b6b7ce7655f1825a5bf03"
+    DOCUMENT = "docs/frontend-implementation-plan.md"
+    EVIDENCE = {"document": DOCUMENT}
+
+    def _fake(self, *, is_ancestor: int = 0, content: str = "| FIP-001 | Completed / Approved | Completed |\n"):
+        return FakeGit(
+            {
+                ("git", "cat-file", "-e", f"{self.SHA}^{{commit}}"): CommandResult(0),
+                ("git", "merge-base", "--is-ancestor", self.SHA, "main"): CommandResult(is_ancestor),
+                ("git", "show", f"{self.SHA}:{self.DOCUMENT}"): CommandResult(0, content),
+            }
+        )
+
+    def test_fip_001_completion_evidence_passes(self):
+        fake = self._fake(content="| FIP-001 | Completed / Approved | Completed |\n")
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA, self.EVIDENCE)
+        self.assertEqual(result.status, "PASS")
+
+    def test_fip_002_completion_evidence_passes(self):
+        fake = self._fake(content="| FIP-002 | Completed / Approved | Completed |\n")
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-002", self.SHA, self.EVIDENCE)
+        self.assertEqual(result.status, "PASS")
+
+    def test_completion_evidence_missing_document_key_escalates(self):
+        fake = self._fake()
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA, {})
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_completion_evidence_absent_at_commit_escalates(self):
+        fake = FakeGit(
+            {
+                ("git", "cat-file", "-e", f"{self.SHA}^{{commit}}"): CommandResult(0),
+                ("git", "merge-base", "--is-ancestor", self.SHA, "main"): CommandResult(0),
+                ("git", "show", f"{self.SHA}:{self.DOCUMENT}"): CommandResult(1, stderr="path does not exist"),
+            }
+        )
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA, self.EVIDENCE)
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_completion_evidence_names_different_fip_escalates(self):
+        fake = self._fake(content="| FIP-003 | Draft Document Only | Not Started |\n")
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA, self.EVIDENCE)
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_completion_evidence_wrong_status_escalates(self):
+        fake = self._fake(content="| FIP-001 | Draft Document Only | Not Started |\n")
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA, self.EVIDENCE)
+        self.assertEqual(result.status, "ESCALATE")
+
+    def test_completion_evidence_non_ancestor_still_escalates(self):
+        fake = self._fake(is_ancestor=1)
+        result = ManufacturingGitAutomation(fake).verify_prerequisite("FIP-001", self.SHA, self.EVIDENCE)
+        self.assertEqual(result.status, "ESCALATE")
+
+
+class RealRepositoryPrerequisiteProofTest(unittest.TestCase):
+    """Integration check against the actual repository (no mocking): production
+    FIP-001 and FIP-002 completion evidence must resolve to PASS."""
+
+    ROOT_COMMIT = "38b618238b64caccf58b6b7ce7655f1825a5bf03"
+    EVIDENCE = {"document": "docs/frontend-implementation-plan.md"}
+
+    def test_fip_001_and_fip_002_completion_evidence_pass_against_real_repo(self):
+        automation = ManufacturingGitAutomation()
+        for fip in ("FIP-001", "FIP-002"):
+            result = automation.verify_prerequisite(fip, self.ROOT_COMMIT, self.EVIDENCE)
+            self.assertEqual(result.status, "PASS", result.reason)
+
+
 if __name__ == "__main__":
     unittest.main()
