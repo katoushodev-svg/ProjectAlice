@@ -734,5 +734,26 @@ class StagedGitApiTest(unittest.TestCase):
         self.assertEqual(result.status, "UNKNOWN")
 
 
+class ImplementationCommitSafetyTest(unittest.TestCase):
+    def test_exact_path_commit_and_records_rejection(self):
+        commands = []
+        reads = {"head": 0}
+        def runner(arguments):
+            command = tuple(arguments); commands.append(command)
+            if command == ("git", "branch", "--show-current"): return CommandResult(0, "fip-007/implementation\n")
+            if command == ("git", "rev-parse", "HEAD"):
+                reads["head"] += 1; return CommandResult(0, "base-sha\n" if reads["head"] == 1 else "commit-sha\n")
+            if command == ("git", "rev-parse", "HEAD^"): return CommandResult(0, "base-sha\n")
+            if command == ("git", "status", "--porcelain", "--untracked-files=all"): return CommandResult(0, " M frontend/lib/conversation/presentation/screen/shell.dart\n")
+            if command == ("git", "show", "--format=", "--name-only", "commit-sha"): return CommandResult(0, "frontend/lib/conversation/presentation/screen/shell.dart\n")
+            return CommandResult(0)
+        result = ManufacturingGitAutomation(runner).commit_implementation("run", "fip-007/implementation", "base-sha", ["frontend/lib/conversation/presentation/screen/shell.dart"], ["frontend/lib/conversation/presentation/screen/**"], "feat(fip-007): implement screen shell")
+        self.assertEqual(result.status, "SUCCESS")
+        self.assertIn(("git", "add", "--", "frontend/lib/conversation/presentation/screen/shell.dart"), commands)
+        self.assertNotIn(("git", "add", "."), commands); self.assertNotIn(("git", "add", "-A"), commands)
+        rejected = ManufacturingGitAutomation(runner).commit_implementation("run", "fip-007/implementation", "base-sha", ["manufacturing/records/fip-006.json"], ["frontend/**"], "message")
+        self.assertEqual(rejected.status, "FAILURE")
+
+
 if __name__ == "__main__":
     unittest.main()

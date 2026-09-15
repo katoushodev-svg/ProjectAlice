@@ -65,6 +65,35 @@ class EvidenceCommitResult:
 
 
 @dataclass(frozen=True)
+class ImplementationCommitResult:
+    status: str
+    operation: str
+    reason: str
+    run_id: str | None = None
+    branch: str | None = None
+    implementation_commit_sha: str | None = None
+    changed_files: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PrerequisiteResult:
+    status: str
+    fip: str
+    reason: str
+    implementation_commit_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class RepositoryPreflight:
+    status: str
+    reason: str
+    branch: str | None = None
+    head_sha: str | None = None
+    base_sha: str | None = None
+    origin: str | None = None
+
+
+@dataclass(frozen=True)
 class PushResult:
     status: str
     operation: str
@@ -203,6 +232,49 @@ class ManufacturingGitAutomation:
                 push=push_verified,
                 commit_hash=commit_hash,
             )
+
+    def commit_implementation(self, run_id: str, branch: str, expected_head: str, adapter_changed_files: Sequence[str], allowed_paths: Sequence[str], message: str) -> ImplementationCommitResult:
+        operation = "commit_implementation"
+        try:
+            self._validate_run_identity(run_id, branch, expected_head); self._validate_isolated_branch(branch)
+            if not isinstance(message, str) or not message: raise GitSafetyError("Implementation Commit message is required")
+            authorized = self._validate_implementation_paths(adapter_changed_files, allowed_paths)
+            if self._read_required("git", "branch", "--show-current") != branch: raise GitSafetyError("current branch does not match Implementation Commit")
+            if self._read_required("git", "rev-parse", "HEAD") != expected_head: raise GitSafetyError("current HEAD does not match Implementation preflight")
+            if self._worktree_paths() != set(authorized): raise GitSafetyError("worktree changes do not exactly match authorized changed_files")
+            self._run("git", "add", "--", *authorized); self._run("git", "commit", "-m", message)
+            sha = self._read_required("git", "rev-parse", "HEAD")
+            if self._read_required("git", "rev-parse", "HEAD^") != expected_head or self._read_commit_paths(sha) != set(authorized): raise GitResultUnknown("Implementation Commit could not be verified")
+            return ImplementationCommitResult("SUCCESS", operation, "Implementation Commit A verified", run_id, branch, sha, tuple(authorized))
+        except GitResultUnknown as error: return ImplementationCommitResult("UNKNOWN", operation, str(error), run_id, branch)
+        except GitSafetyError as error: return ImplementationCommitResult("FAILURE", operation, str(error), run_id, branch)
+
+    def verify_prerequisite(self, fip: str, implementation_commit_sha: str) -> PrerequisiteResult:
+        try:
+            if not re.fullmatch(r"FIP-\d{3}", fip) or not re.fullmatch(r"[0-9a-f]{7,64}", implementation_commit_sha): raise GitSafetyError("prerequisite identity is invalid")
+            self._run("git", "cat-file", "-e", f"{implementation_commit_sha}^{{commit}}")
+            result = self._run_raw("git", "merge-base", "--is-ancestor", implementation_commit_sha, "main")
+            if result.returncode == 1: return PrerequisiteResult("ESCALATE", fip, "implementation commit is not reachable from current main", implementation_commit_sha)
+            if result.returncode != 0: raise GitResultUnknown("main reachability could not be verified")
+            subject = self._read_required("git", "show", "-s", "--format=%s", implementation_commit_sha)
+            if fip.lower() not in subject.lower() and fip.replace("-", "") not in subject.lower().replace("-", ""): return PrerequisiteResult("ESCALATE", fip, "implementation commit does not identify its FIP", implementation_commit_sha)
+            return PrerequisiteResult("PASS", fip, "implementation commit is reachable from current main", implementation_commit_sha)
+        except GitResultUnknown as error: return PrerequisiteResult("UNKNOWN", fip, str(error), implementation_commit_sha)
+        except GitSafetyError as error: return PrerequisiteResult("ESCALATE", fip, str(error), implementation_commit_sha)
+
+    def preflight(self, expected_branch: str) -> RepositoryPreflight:
+        """Read-only repository identity check; no state is modified."""
+        try:
+            self._validate_isolated_branch(expected_branch)
+            branch = self._read_required("git", "branch", "--show-current")
+            head = self._read_required("git", "rev-parse", "HEAD")
+            base = self._read_required("git", "merge-base", "HEAD", "main")
+            origin = self._read_required("git", "remote", "get-url", "origin")
+            if branch != expected_branch: raise GitSafetyError("current branch does not match requested FIP branch")
+            if self._worktree_paths(): raise GitSafetyError("worktree must be clean before implementation")
+            return RepositoryPreflight("PASS", "repository preflight passed", branch, head, base, origin)
+        except GitResultUnknown as error: return RepositoryPreflight("UNKNOWN", str(error))
+        except GitSafetyError as error: return RepositoryPreflight("ESCALATE", str(error))
 
     def commit_evidence(
         self,
@@ -542,6 +614,35 @@ class ManufacturingGitAutomation:
     def _read_commit_paths(self, commit_sha: str) -> set[str]:
         output = self._read("git", "show", "--format=", "--name-only", commit_sha)
         return {line for line in output.splitlines() if line}
+
+    def _worktree_paths(self) -> set[str]:
+        output = self._run("git", "status", "--porcelain", "--untracked-files=all").stdout
+        paths = {line[3:] for line in output.splitlines() if len(line) >= 4}
+        if any(path.startswith("manufacturing/records/") for path in paths):
+            raise GitSafetyError("manufacturing/records must never be staged or committed")
+        return paths
+
+    @staticmethod
+    def _validate_implementation_paths(changed_files: Sequence[str], allowed_paths: Sequence[str]) -> list[str]:
+        if isinstance(changed_files, (str, bytes)) or not changed_files:
+            raise GitSafetyError("authorized changed_files are required")
+        if isinstance(allowed_paths, (str, bytes)) or not allowed_paths:
+            raise GitSafetyError("allowed_paths are required")
+        import fnmatch
+        import posixpath
+        result: list[str] = []
+        for path in changed_files:
+            if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path:
+                raise GitSafetyError("changed file path is unsafe")
+            normalized = posixpath.normpath(path)
+            if normalized != path or normalized == ".." or normalized.startswith("../") or normalized.startswith("manufacturing/records/"):
+                raise GitSafetyError("changed file path is prohibited")
+            if not any(isinstance(pattern, str) and fnmatch.fnmatch(path, pattern) for pattern in allowed_paths):
+                raise GitSafetyError("changed file is outside allowed_paths")
+            result.append(path)
+        if len(set(result)) != len(result):
+            raise GitSafetyError("changed_files must be unique")
+        return result
 
     def _preflight(self, candidate: dict, expected_remote: str) -> None:
         if candidate.get("candidate_status") != "READY":
