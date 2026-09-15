@@ -249,13 +249,22 @@ class ManufacturingGitAutomation:
         except GitResultUnknown as error: return ImplementationCommitResult("UNKNOWN", operation, str(error), run_id, branch)
         except GitSafetyError as error: return ImplementationCommitResult("FAILURE", operation, str(error), run_id, branch)
 
-    def verify_prerequisite(self, fip: str, implementation_commit_sha: str) -> PrerequisiteResult:
+    def verify_prerequisite(self, fip: str, implementation_commit_sha: str, completion_evidence: Mapping[str, str] | None = None) -> PrerequisiteResult:
         try:
             if not re.fullmatch(r"FIP-\d{3}", fip) or not re.fullmatch(r"[0-9a-f]{7,64}", implementation_commit_sha): raise GitSafetyError("prerequisite identity is invalid")
             self._run("git", "cat-file", "-e", f"{implementation_commit_sha}^{{commit}}")
             result = self._run_raw("git", "merge-base", "--is-ancestor", implementation_commit_sha, "main")
             if result.returncode == 1: return PrerequisiteResult("ESCALATE", fip, "implementation commit is not reachable from current main", implementation_commit_sha)
             if result.returncode != 0: raise GitResultUnknown("main reachability could not be verified")
+            if completion_evidence is not None:
+                # Some prerequisites are bundled into a commit whose subject does
+                # not identify an individual FIP; a Source of Truth document at
+                # that exact commit tree is required as an explicit substitute.
+                document = completion_evidence.get("document") if isinstance(completion_evidence, Mapping) else None
+                if not isinstance(document, str) or not document: raise GitSafetyError("completion evidence document is required")
+                content = self._read_required("git", "show", f"{implementation_commit_sha}:{document}")
+                if not self._completion_evidence_confirms(content, fip): return PrerequisiteResult("ESCALATE", fip, "completion evidence does not confirm FIP is Completed / Approved", implementation_commit_sha)
+                return PrerequisiteResult("PASS", fip, "completion evidence confirms FIP is Completed / Approved", implementation_commit_sha)
             subject = self._read_required("git", "show", "-s", "--format=%s", implementation_commit_sha)
             if fip.lower() not in subject.lower() and fip.replace("-", "") not in subject.lower().replace("-", ""): return PrerequisiteResult("ESCALATE", fip, "implementation commit does not identify its FIP", implementation_commit_sha)
             return PrerequisiteResult("PASS", fip, "implementation commit is reachable from current main", implementation_commit_sha)
@@ -610,6 +619,10 @@ class ManufacturingGitAutomation:
         if not value:
             raise GitResultUnknown(f"command result could not be verified: {' '.join(arguments)}")
         return value
+
+    @staticmethod
+    def _completion_evidence_confirms(content: str, fip: str) -> bool:
+        return any(fip in line and "Completed / Approved" in line for line in content.splitlines())
 
     def _read_commit_paths(self, commit_sha: str) -> set[str]:
         output = self._read("git", "show", "--format=", "--name-only", commit_sha)

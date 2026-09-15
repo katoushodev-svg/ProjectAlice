@@ -300,7 +300,8 @@ class ManufacturingRuntime:
                 return self._escalate(history, run_id, preflight.reason, unknown=preflight.status == "UNKNOWN")
             gates = self._prerequisite_gates(entry.get("prerequisites", ()))
             if any(value != "PASS" for value in gates.values()):
-                return self._escalate(history, run_id, "prerequisite completion is not verified")
+                unknown = any(value == "UNKNOWN" for value in gates.values())
+                return self._escalate(history, run_id, "prerequisite completion is not verified", unknown=unknown)
             attempts = int(entry["run_budget"])
             actual_attempts = 0
             last_review = None
@@ -375,8 +376,15 @@ class ManufacturingRuntime:
     def _prerequisite_gates(self, prerequisites: Any) -> dict[str, str]:
         # Existing formal completion commits; the Git Layer independently proves
         # each is a commit and ancestor of the current main.
-        proof = {"FIP-003": "4dfbbb5602b51318ca643e115bb50116a877952d", "FIP-004": "09229608e17d1758afa2470218538ffa7e79433f", "FIP-005": "0cf34b5d74693bc75438e87d878179903ea08b7e", "FIP-006": "cbbe7affc98a2bc8bd8649a670d966676830d3c4"}
-        return {fip: self.git_layer.verify_prerequisite(fip, proof.get(fip, "")).status for fip in prerequisites}
+        # FIP-001 and FIP-002 have no commit in Git history whose subject
+        # identifies either FIP individually; both are bundled into the initial
+        # commit below. The Git Layer instead requires that commit's tree to
+        # contain Source of Truth completion evidence naming the specific FIP as
+        # Completed / Approved, so nothing here is taken on faith or guessed.
+        root_commit = "38b618238b64caccf58b6b7ce7655f1825a5bf03"
+        proof = {"FIP-001": root_commit, "FIP-002": root_commit, "FIP-003": "4dfbbb5602b51318ca643e115bb50116a877952d", "FIP-004": "09229608e17d1758afa2470218538ffa7e79433f", "FIP-005": "0cf34b5d74693bc75438e87d878179903ea08b7e", "FIP-006": "cbbe7affc98a2bc8bd8649a670d966676830d3c4"}
+        completion_evidence = {"FIP-001": {"document": "docs/frontend-implementation-plan.md"}, "FIP-002": {"document": "docs/frontend-implementation-plan.md"}}
+        return {fip: self.git_layer.verify_prerequisite(fip, proof.get(fip, ""), completion_evidence.get(fip)).status for fip in prerequisites}
 
     @staticmethod
     def _check_dict(result: Any) -> dict[str, str]: return {"status": result.status, "summary": result.summary}
