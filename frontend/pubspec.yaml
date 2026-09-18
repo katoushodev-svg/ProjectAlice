@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: 3.4.2
+  flutter_markdown_plus: 1.0.12
   http: 1.6.0
 
 dev_dependencies:

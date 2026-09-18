@@ -7,7 +7,7 @@
 | Document | `frontend-implementation-plan.md` |
 | Status | Approved — Phase 0 Planning Mode |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-21 JST |
+| Last Updated | 2026-09-17 JST |
 
 本ドキュメントは、承認済みのPhase 1 Frontend Detailed DesignをAI Coding Assistantが実装へ投入するための作業順序、変更単位、入力文書、成果物およびGateを定義する。
 
@@ -19,16 +19,16 @@ Architecture、API、UIまたはSecurityの新しいDecisionを本ドキュメ�
 |---|---|---|
 | FIP-001 | Completed / Approved | Completed |
 | FIP-002 | Completed / Approved | Completed |
-| FIP-003 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-004 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-005 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-006 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-007 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-008 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-009 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-010 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-011 | Draft Planning Completed / User Confirmed | Not Started |
-| FIP-012 | Draft Planning Completed / User Confirmed | Not Started |
+| FIP-003 | Approved / Implementation Ready | Completed / PASS |
+| FIP-004 | Approved / Implementation Ready | Completed / PASS |
+| FIP-005 | Approved / Implementation Ready | Completed / PASS |
+| FIP-006 | Approved / Implementation Ready | Completed / PASS |
+| FIP-007 | Approved / Implementation Ready | Completed / PASS |
+| FIP-008 | Approved / Implementation Ready | Completed / PASS |
+| FIP-009 | Approved / Implementation Ready | Not Started |
+| FIP-010 | Approved / Implementation Ready | Not Started |
+| FIP-011 | Approved / Implementation Ready | Not Started |
+| FIP-012 | Approved / Implementation Ready | Not Started |
 | FIP-013〜FIP-014 | Deferred until Phase 1 implementation resumes | Not Started |
 
 FIP-002は2026-08-19 JSTに、Configuration Test、Static Check、Xcode Debug Configuration経由の起動、およびiPhone 16 Pro Simulatorでの`Alice`表示確認をもって完了した。
@@ -50,12 +50,12 @@ Implementation Preparationの目的は、設計書を単に一覧化すること
 
 FIP-002完了後はPhase 1 Frontendのソースコード実装を停止する。FIP-003〜FIP-012では実装計画ドキュメントだけを順番に作成し、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。検証コードもユーザーの明示的な許可なしに作成しない。
 
-FIP-003〜FIP-012の各文書は、作成時点では次の状態とする。
+FIP-009〜FIP-012の各文書は、実装開始前の状態として次を維持する。FIP-003〜FIP-008は既に実装完了しているため、各FIPの個別Source of Truthおよびレビュー記録を優先する。
 
 ```text
-Status: Draft
+Status: Approved / Implementation Ready
 Implementation: Not Started
-Review Required After Phase 2-4 Design: Yes
+Review Required After Phase 2-4 Design: Completed
 ```
 
 これらはPhase 1 Frontendの完成形と実装順序を明確にするためのDraftであり、Phase 2〜4の具体仕様を先取りして確定するものではない。
@@ -162,7 +162,7 @@ frontend/
 | 13 | FIP-013 Local Integration | Flutter → Local Backend → Fake AI → DynamoDB Local | Deferred |
 | 14 | FIP-014 Implementation Review | Scope、Dependency、Security、Test、Design Drift Review | Deferred |
 
-現在はFIP-003〜FIP-012をドキュメントとしてのみ作成する。FIP-012のDraft完成後はPhase 1 Frontend作業を停止し、Phase 2、Phase 3、Phase 4の設計およびPhase 1〜4横断レビューへ移る。Phase 0 Final Design Review完了後、FIP-003から実装を再開する。
+FIP-003〜FIP-008は実装・レビュー・テストを完了している。現在の次工程はFIP-009 Send and Streamingであり、FIP-009以降は承認済み計画に従って順次実装する。
 
 ### 6.1 Required Contents of Each FIP Draft
 
@@ -291,7 +291,7 @@ Frontend実装開始前に次を満たす。
 - [ ] Phase 0 Final Design Review完了
 - [x] FIP-003がApproved / Implementation Ready
 
-上記のPhase 0関連項目が未完了の状態でFIP-003以降を実装しない。
+Phase 0 Final Design ReviewおよびRepository synchronization gateは既に解消されている。FIP-003〜FIP-008の完了判定は各FIPのSource of Truthと実装レビュー記録を基準とし、FIP-009以降は承認済みImplementation Ready計画に従う。
 
 ---
 
@@ -435,9 +435,10 @@ FIP-012 Draft完成後はPhase 1 Frontend作業を停止し、Phase 2〜4設計�
 FIP-003〜FIP-012 Draft Planning: Completed / User Confirmed
 FIP-003〜FIP-012 Cross-phase Re-review: Completed / Passed
 FIP-003〜FIP-012 Plan Status: Approved / Implementation Ready
-FIP-003〜FIP-012 Implementation: Not Started
-Phase 1 Frontend Implementation: Paused
-Next Work: Phase 0 Final Design Review
+FIP-003〜FIP-008 Implementation: Completed / PASS
+FIP-009〜FIP-012 Implementation: Not Started
+Phase 1 Frontend Implementation: In Progress
+Next Work: FIP-009 Send and Streaming
 Cross-phase Review: Completed / Passed — 2026-09-04
 ```
 

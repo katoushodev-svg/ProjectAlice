@@ -6,16 +6,17 @@
 |---|---|
 | Document | `fip-008-initial-history-plan.md` |
 | FIP | FIP-008 Initial History |
-| Status | Draft |
-| Draft Planning | In Progress / User Review Pending |
-| Implementation | Not Started |
-| Review Required After Phase 2-4 Design | Yes |
+| Status | Completed / PASS |
+| Draft Planning | Completed / User Confirmed |
+| Implementation | Completed / PASS |
+| Implementation Review | PASS |
+| Review Required After Phase 2-4 Design | Completed |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-20 JST |
+| Last Updated | 2026-09-17 JST |
 
-本ドキュメントは、Phase 1 Frontendの起動時Conversation / Message History取得、Initial Loading、Empty State、Canonical History表示およびInitial Load Failureを、後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義するDraft実装計画である。
+本ドキュメントは、Phase 1 Frontendの起動時Conversation / Message History取得、Initial Loading、Empty State、Canonical History表示およびInitial Load Failureの実装内容と完了条件を記録する実装計画・完了記録である。
 
-本Draft作成時点では、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase ReviewおよびPhase 0 Final Design Reviewが完了するまで、FIP-008を実装してはならない。
+Phase 2〜4設計後のCross-phase Review、FIP-003〜012再レビューおよびPhase 0 Final Design Reviewは完了済みであり、本FIPの実装・検証も完了している。Concrete GatewayとProduction WiringはFIP-009の責務として本FIPには含めない。
 
 ---
 
@@ -783,28 +784,28 @@ Source of Truthと矛盾しない範囲で、AI Coding Assistantは次を合理�
 
 FIP-008 Implementationは次をすべて満たすこと。
 
-- [ ] Initial LoadがConversation → Messagesの順に一度だけ実行される
-- [ ] Initial Pageは`limit=50`、Cursorなしで要求される
-- [ ] `CONVERSATION_NOT_FOUND`が正常なEmpty Stateになる
-- [ ] その他FailureをEmptyとして扱わない
-- [ ] Loading / Empty / History / Failureが排他的に表示される
-- [ ] 300 ms未満のLoadでIndicatorが点滅しない
-- [ ] 300 ms以上でIndicatorと正確なLabelが表示される
-- [ ] Initial Loading / Failure中にComposerが無効である
-- [ ] Ready時にComposerが利用可能である
-- [ ] Page内Orderingを維持する
-- [ ] JST日付境界が端末Timezoneに依存しない
-- [ ] User / Alice Bubbleが承認済みAlignmentと幅で表示される
-- [ ] Safe MarkdownがImage / HTML / External Linkを実行しない
-- [ ] ReloadがFlow全体を一度だけ再実行する
-- [ ] Cursor、Content、Raw ErrorまたはSecretをLog / UIへ出さない
-- [ ] History / Draft / Scroll Positionを永続化しない
-- [ ] Concrete Gateway、SendまたはPaginationを実装していない
-- [ ] `flutter_markdown_plus`以外のDependencyを追加していない
-- [ ] Unit / Widget / Golden / Security Testが成功する
-- [ ] `dart format lib test`が成功する
-- [ ] `flutter analyze`が成功する
-- [ ] `flutter test`が成功する
+- [x] Initial LoadがConversation → Messagesの順に一度だけ実行される
+- [x] Initial Pageは`limit=50`、Cursorなしで要求される
+- [x] `CONVERSATION_NOT_FOUND`が正常なEmpty Stateになる
+- [x] その他FailureをEmptyとして扱わない
+- [x] Loading / Empty / History / Failureが排他的に表示される
+- [x] 300 ms未満のLoadでIndicatorが点滅しない
+- [x] 300 ms以上でIndicatorと正確なLabelが表示される
+- [x] Initial Loading / Failure中にComposerが無効である
+- [x] Ready時にComposerが利用可能である
+- [x] Page内Orderingを維持する
+- [x] JST日付境界が端末Timezoneに依存しない
+- [x] User / Alice Bubbleが承認済みAlignmentと幅で表示される
+- [x] Safe MarkdownがImage / HTML / External Linkを実行しない
+- [x] ReloadがFlow全体を一度だけ再実行する
+- [x] Cursor、Content、Raw ErrorまたはSecretをLog / UIへ出さない
+- [x] History / Draft / Scroll Positionを永続化しない
+- [x] Concrete Gateway、SendまたはPaginationを実装していない
+- [x] `flutter_markdown_plus`以外のDependencyを追加していない
+- [x] Unit / Widget / Golden / Security Testが成功する
+- [x] `dart format lib test`が成功する
+- [x] `flutter analyze`が成功する
+- [x] `flutter test`が成功する
 
 ---
 
@@ -916,10 +917,13 @@ Phase 2〜4 Design完了後に次を再確認する。
 現在の状態:
 
 ```text
-FIP-008 Document: Draft Created
+FIP-008 Document: Approved / Implementation Ready
 FIP-008 Draft Planning: Completed / User Confirmed
-FIP-008 Implementation: Not Started
-Cross-phase Review: Required
+FIP-008 Cross-phase Review: PASS
+FIP-008 Implementation: Completed / PASS
+FIP-008 Implementation Review: PASS
+FIP-008 Definition of Done: Satisfied
+Next FIP: FIP-009 Send and Streaming
 ```
 
-本Draftはユーザー確認済みであり、Draft Planningを`Completed / User Confirmed`として記録する。ソースコード実装には進まず、次にFIP-009 Send and StreamingのDraft実装計画書作成へ進む。
+FIP-008の実装、対象Unit / Widget / Golden / Security Test、`dart format`、`flutter analyze`および`flutter test`の検証が完了し、Implementation ReviewはPASSと判定された。FIP-008の次工程はFIP-009 Send and Streamingである。
