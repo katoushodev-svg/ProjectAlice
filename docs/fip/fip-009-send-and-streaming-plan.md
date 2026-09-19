@@ -6,16 +6,16 @@
 |---|---|
 | Document | `fip-009-send-and-streaming-plan.md` |
 | FIP | FIP-009 Send and Streaming |
-| Status | Draft |
+| Status | Approved / Implementation Ready |
 | Draft Planning | Completed / User Confirmed |
 | Implementation | Not Started |
-| Review Required After Phase 2-4 Design | Yes |
+| Cross-phase Re-review | Completed / Passed |
 | Target | Phase 1 iOS Frontend |
-| Last Updated | 2026-08-20 JST |
+| Last Updated | 2026-09-19 JST |
 
-本ドキュメントは、Phase 1 FrontendのMessage送信、SSE受信、Streaming表示およびCanonical Completionを、後からGitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義するDraft実装計画である。
+本ドキュメントは、Phase 1 FrontendのMessage送信、SSE受信、Streaming表示およびCanonical Completionを、GitHub Copilot等のAI Coding Assistantへ実装依頼できる粒度で定義した承認済みImplementation Planである。
 
-本Draft作成時点では、ソースコード、Test Code、Dependency、AssetまたはXcode設定を変更しない。Phase 2〜4設計後のCross-phase ReviewおよびPhase 0 Final Design Reviewが完了するまで、FIP-009を実装してはならない。
+本計画はPhase 2〜4 formal design、Phase 1〜4 Cross-phase Review、FIP-003〜012 Re-reviewおよびPhase 0 Final Design Reviewの完了を反映した承認済みImplementation Planである。FIP-009の実装を開始してよい。
 
 ---
 
@@ -902,10 +902,11 @@ AIは次を独自変更してはならない。
 現在の状態:
 
 ```text
-FIP-009 Document: Draft Created
+FIP-009 Document: Approved / Implementation Ready
 FIP-009 Draft Planning: Completed / User Confirmed
+FIP-009 Cross-phase Re-review: Completed / Passed
 FIP-009 Implementation: Not Started
-Cross-phase Review: Required
+Next Work: FIP-009 Implementation
 ```
 
-本Draftはユーザー確認済みであり、Draft Planningを`Completed / User Confirmed`として記録する。ソースコード実装には進まず、次にFIP-010 Retry and FailureのDraft実装計画書作成へ進む。
+Phase 2〜4 formal design、Phase 1〜4 Cross-phase Review、FIP-003〜012 Re-reviewおよびPhase 0 Final Design Reviewは完了済みである。本計画はその結果を反映した承認済みImplementation Planであり、FIP-009の実装を開始してよい。
