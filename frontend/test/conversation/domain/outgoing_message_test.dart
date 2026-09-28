@@ -19,6 +19,18 @@ void main() {
     expect(message.idempotencyKey, validKey);
   });
 
+  test('accepts Japanese content without modification', () {
+    const content = '  こんにちは、Alice。\n次の行です。  ';
+
+    final result = OutgoingMessage.create(
+      idempotencyKey: validKey,
+      content: content,
+    );
+
+    expect(result, isA<DomainSuccess<OutgoingMessage>>());
+    expect((result as DomainSuccess<OutgoingMessage>).value.content, content);
+  });
+
   test('counts Unicode code points and accepts exactly the limit', () {
     final result = OutgoingMessage.create(
       idempotencyKey: validKey,
