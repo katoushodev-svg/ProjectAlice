@@ -20,10 +20,16 @@ class ConversationScreenShell extends StatelessWidget {
     required this.focusNode,
     required this.scrollController,
     required this.onSend,
+    this.onScrollNotification,
+    this.messageViewportKey,
+    this.showLatestButton = false,
+    this.onLatestTap,
     this.composerEnabled = true,
     this.sendEnabled = true,
     this.validationMessage,
     this.onDraftChanged,
+    this.characterCount = 0,
+    this.showCharacterCount = false,
   });
 
   final AliceCoreVisualState coreVisualState;
@@ -32,10 +38,16 @@ class ConversationScreenShell extends StatelessWidget {
   final FocusNode focusNode;
   final ScrollController scrollController;
   final VoidCallback onSend;
+  final NotificationListenerCallback<ScrollNotification>? onScrollNotification;
+  final GlobalKey? messageViewportKey;
+  final bool showLatestButton;
+  final VoidCallback? onLatestTap;
   final bool composerEnabled;
   final bool sendEnabled;
   final String? validationMessage;
   final ValueChanged<String>? onDraftChanged;
+  final int characterCount;
+  final bool showCharacterCount;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +67,10 @@ class ConversationScreenShell extends StatelessWidget {
                 messageItems: messageItems,
                 scrollController: scrollController,
                 keyboardVisible: keyboardVisible,
+                onScrollNotification: onScrollNotification,
+                messageViewportKey: messageViewportKey,
+                showLatestButton: showLatestButton,
+                onLatestTap: onLatestTap,
               ),
             ),
             ComposerPanel(
@@ -64,6 +80,8 @@ class ConversationScreenShell extends StatelessWidget {
               sendEnabled: sendEnabled,
               validationMessage: validationMessage,
               onDraftChanged: onDraftChanged,
+              characterCount: characterCount,
+              showCharacterCount: showCharacterCount,
               onSend: onSend,
             ),
           ],
@@ -81,12 +99,20 @@ class _ConversationBody extends StatelessWidget {
     required this.messageItems,
     required this.scrollController,
     required this.keyboardVisible,
+    required this.onScrollNotification,
+    required this.messageViewportKey,
+    required this.showLatestButton,
+    required this.onLatestTap,
   });
 
   final AliceCoreVisualState coreVisualState;
   final List<Widget> messageItems;
   final ScrollController scrollController;
   final bool keyboardVisible;
+  final NotificationListenerCallback<ScrollNotification>? onScrollNotification;
+  final GlobalKey? messageViewportKey;
+  final bool showLatestButton;
+  final VoidCallback? onLatestTap;
 
   @override
   Widget build(BuildContext context) {
@@ -102,25 +128,59 @@ class _ConversationBody extends StatelessWidget {
           keyboardVisible: keyboardVisible,
         );
 
-        return Column(
+        return Stack(
           children: [
-            AnimatedContainer(
-              duration: ConversationLayoutMetrics.coreTransitionDuration,
-              curve: Curves.easeInOut,
-              height: coreVisible ? coreHeight : 0,
-              child: coreVisible
-                  ? AliceCoreRegion(
-                      visualState: coreVisualState,
-                      height: coreHeight,
-                    )
-                  : null,
+            Column(
+              children: [
+                AnimatedContainer(
+                  duration: ConversationLayoutMetrics.coreTransitionDuration,
+                  curve: Curves.easeInOut,
+                  height: coreVisible ? coreHeight : 0,
+                  child: coreVisible
+                      ? AliceCoreRegion(
+                          visualState: coreVisualState,
+                          height: coreHeight,
+                        )
+                      : null,
+                ),
+                Expanded(
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: onScrollNotification,
+                    child: MessageViewport(
+                      key: messageViewportKey,
+                      controller: scrollController,
+                      items: messageItems,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            Expanded(
-              child: MessageViewport(
-                controller: scrollController,
-                items: messageItems,
+            if (showLatestButton && onLatestTap != null)
+              Positioned(
+                right: 16,
+                bottom: 12,
+                child: Semantics(
+                  label: '最新のメッセージへ移動',
+                  button: true,
+                  onTap: onLatestTap,
+                  excludeSemantics: true,
+                  child: SizedBox(
+                    height: 48,
+                    child: Material(
+                      color: Theme.of(context).colorScheme.surface,
+                      shape: const StadiumBorder(),
+                      child: Tooltip(
+                        message: '最新のメッセージへ移動',
+                        child: TextButton.icon(
+                          onPressed: onLatestTap,
+                          icon: const Icon(Icons.south),
+                          label: const Text('最新へ'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
           ],
         );
       },

@@ -6,9 +6,10 @@ sealed class ConversationSendEvent {
 }
 
 final class StreamStarted extends ConversationSendEvent {
-  const StreamStarted(this.requestId);
+  const StreamStarted(this.requestId, {this.userMessage});
 
   final String requestId;
+  final Message? userMessage;
 }
 
 final class AssistantDelta extends ConversationSendEvent {
@@ -19,10 +20,17 @@ final class AssistantDelta extends ConversationSendEvent {
 }
 
 final class AssistantCompleted extends ConversationSendEvent {
-  const AssistantCompleted({required this.requestId, required this.messages});
+  const AssistantCompleted({
+    required this.requestId,
+    required this.messages,
+    this.userMessage,
+    this.assistantMessage,
+  });
 
   final String requestId;
   final List<Message> messages;
+  final Message? userMessage;
+  final Message? assistantMessage;
 }
 
 final class SendFailed extends ConversationSendEvent {

@@ -12,7 +12,10 @@ final class StreamingAssistantMessage extends StatelessWidget {
     return Padding(
       key: const ValueKey('streaming-assistant'),
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: AliceMessageBubble(content: text),
+      child: Semantics(
+        label: 'Alice、回答を作成中: $text',
+        child: ExcludeSemantics(child: AliceMessageBubble(content: text)),
+      ),
     );
   }
 }

@@ -13,7 +13,12 @@ final class PendingUserMessage extends StatelessWidget {
     return Padding(
       key: ValueKey('pending-user-${message.idempotencyKey}'),
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: UserMessageBubble(content: message.content),
+      child: Semantics(
+        label: 'あなた、送信中: ${message.content}',
+        child: ExcludeSemantics(
+          child: UserMessageBubble(content: message.content),
+        ),
+      ),
     );
   }
 }

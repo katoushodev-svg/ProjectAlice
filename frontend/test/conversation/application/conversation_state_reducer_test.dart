@@ -62,7 +62,7 @@ void main() {
   }) {
     return (reducer.reduce(
       sending,
-      StreamStarted(requestId),
+      StreamStarted(requestId, userMessage: userMessage),
     ) as StateTransition).nextState;
   }
 
@@ -137,7 +137,7 @@ void main() {
     ) as StateTransition;
     final streaming = reducer.reduce(
       sending.nextState,
-      const StreamStarted('request-1'),
+      StreamStarted('request-1', userMessage: userMessage),
     ) as StateTransition;
     final delta = reducer.reduce(
       streaming.nextState,
@@ -148,7 +148,7 @@ void main() {
       const AssistantDeltaReceived(requestId: 'request-2', delta: 'ignored'),
     );
 
-    expect(delta.nextState.messages, isEmpty);
+    expect(delta.nextState.messages, [userMessage]);
     expect(delta.nextState.temporaryAssistantText, 'partial');
     expect(invalid, isA<StateTransitionFailure>());
   });
@@ -167,7 +167,7 @@ void main() {
     ) as StateTransition;
     final streaming = reducer.reduce(
       sending.nextState,
-      const StreamStarted('request-1'),
+      StreamStarted('request-1', userMessage: userMessage),
     ) as StateTransition;
     final invalid = reducer.reduce(
       streaming.nextState,
@@ -186,6 +186,72 @@ void main() {
     );
 
     expect(invalid, isA<StateTransitionFailure>());
+  });
+
+  test(
+    'rejects completion when canonical user identity differs from started',
+    () {
+      final ready = readyState();
+      final sending = sendingState(ready);
+      final streaming = streamingState(sending);
+      final completedWithDifferentId = reducer.reduce(
+        streaming,
+        AssistantCompleted(
+          requestId: 'request-1',
+          messages: [
+            Message(
+              id: 'user-2',
+              role: MessageRole.user,
+              content: userMessage.content,
+              createdAt: userMessage.createdAt,
+            ),
+            assistantMessage,
+          ],
+        ),
+      );
+      final completedWithDifferentTimestamp = reducer.reduce(
+        streaming,
+        AssistantCompleted(
+          requestId: 'request-1',
+          messages: [
+            Message(
+              id: userMessage.id,
+              role: userMessage.role,
+              content: userMessage.content,
+              createdAt: userMessage.createdAt.add(const Duration(seconds: 1)),
+            ),
+            assistantMessage,
+          ],
+        ),
+      );
+      final completedWithDifferentRole = reducer.reduce(
+        streaming,
+        AssistantCompleted(
+          requestId: 'request-1',
+          messages: [
+            Message(
+              id: userMessage.id,
+              role: MessageRole.assistant,
+              content: userMessage.content,
+              createdAt: userMessage.createdAt,
+            ),
+            assistantMessage,
+          ],
+        ),
+      );
+
+      expect(completedWithDifferentId, isA<StateTransitionFailure>());
+      expect(completedWithDifferentTimestamp, isA<StateTransitionFailure>());
+      expect(completedWithDifferentRole, isA<StateTransitionFailure>());
+    },
+  );
+
+  test('rejects stream.started without its canonical user message', () {
+    final sending = sendingState(readyState());
+
+    final result = reducer.reduce(sending, const StreamStarted('request-1'));
+
+    expect(result, isA<StateTransitionFailure>());
   });
 
   test('initial state is initialLoading', () {
