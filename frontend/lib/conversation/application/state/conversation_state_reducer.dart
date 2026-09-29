@@ -78,6 +78,15 @@ final class ConversationStateReducer {
     if (event is OlderPageLoadStarted) return _startOlder(state, event);
     if (event is OlderPageLoadSucceeded) return _completeOlder(state, event);
     if (event is OlderPageLoadFailed) return _failOlder(state, event);
+    if (event is LatestPageReconciliationStarted) {
+      return _startLatestPageReconciliation(state);
+    }
+    if (event is LatestPageReconciliationSucceeded) {
+      return _completeLatestPageReconciliation(state, event);
+    }
+    if (event is LatestPageReconciliationFailed) {
+      return _failLatestPageReconciliation(state, event);
+    }
     if (event is SendStarted) {
       if (state.status != ConversationScreenStatus.ready) {
         return _invalid(ConversationOperation.send);
@@ -89,6 +98,24 @@ final class ConversationStateReducer {
           messages: state.messages,
           pagination: state.pagination,
           pendingSend: event.outgoingMessage,
+        ),
+      );
+    }
+    if (event is RecoverySendStarted) {
+      if (state.status != ConversationScreenStatus.sendFailed ||
+          state.pendingSend == null) {
+        return _invalid(ConversationOperation.send);
+      }
+      return StateTransition(
+        ConversationScreenState.fromReducer(
+          status: ConversationScreenStatus.sending,
+          conversation: state.conversation,
+          messages: state.messages,
+          pagination: state.pagination,
+          pendingSend: event.outgoingMessage,
+          canonicalPendingUserId: event.preserveCanonicalUserId
+              ? state.canonicalPendingUserId
+              : null,
         ),
       );
     }
@@ -175,6 +202,69 @@ final class ConversationStateReducer {
     );
   }
 
+  ConversationStateReducerResult _startLatestPageReconciliation(
+    ConversationScreenState state,
+  ) {
+    final fromInvalidCursor =
+        state.status == ConversationScreenStatus.ready &&
+        state.failure?.category == ConversationFailureCategory.invalidCursor &&
+        state.failure?.operation == ConversationOperation.pagination;
+    if ((!fromInvalidCursor &&
+            state.status != ConversationScreenStatus.loadingOlder) ||
+        !state.pagination.hasMore ||
+        state.pagination.nextCursor == null) {
+      return _invalid(ConversationOperation.pagination);
+    }
+    return StateTransition(
+      ConversationScreenState.fromReducer(
+        status: ConversationScreenStatus.reconcilingHistory,
+        conversation: state.conversation,
+        messages: state.messages,
+        pagination: state.pagination,
+      ),
+    );
+  }
+
+  ConversationStateReducerResult _completeLatestPageReconciliation(
+    ConversationScreenState state,
+    LatestPageReconciliationSucceeded event,
+  ) {
+    if (state.status != ConversationScreenStatus.reconcilingHistory ||
+        _initialMessages(event.page.messages) == null) {
+      return _protocol(ConversationOperation.pagination);
+    }
+    return StateTransition(
+      ConversationScreenState.fromReducer(
+        status: ConversationScreenStatus.ready,
+        conversation: state.conversation,
+        messages: event.page.messages,
+        pagination: ConversationPaginationState(
+          hasMore: event.page.hasMore,
+          nextCursor: event.page.nextCursor,
+        ),
+      ),
+    );
+  }
+
+  ConversationStateReducerResult _failLatestPageReconciliation(
+    ConversationScreenState state,
+    LatestPageReconciliationFailed event,
+  ) {
+    if (state.status != ConversationScreenStatus.reconcilingHistory ||
+        event.failure.operation != ConversationOperation.pagination) {
+      return _invalid(ConversationOperation.pagination);
+    }
+    return StateTransition(
+      ConversationScreenState.fromReducer(
+        status: ConversationScreenStatus.ready,
+        conversation: state.conversation,
+        messages: state.messages,
+        pagination: state.pagination,
+        failure: event.failure,
+      ),
+    );
+  }
+
   ConversationStateReducerResult _startStream(
     ConversationScreenState state,
     StreamStarted event,
@@ -183,15 +273,30 @@ final class ConversationStateReducer {
         event.requestId.isEmpty) {
       return _invalid(ConversationOperation.send);
     }
+
+    var messages = state.messages;
+    final userMessage = event.userMessage;
+    final pending = state.pendingSend;
+    if (pending == null ||
+        userMessage == null ||
+        userMessage.role != MessageRole.user ||
+        userMessage.content != pending.content) {
+      return _protocol(ConversationOperation.send);
+    }
+    final merged = _mergeMessages(messages, [userMessage]);
+    if (merged == null) return _protocol(ConversationOperation.send);
+    messages = merged;
+
     return StateTransition(
       ConversationScreenState.fromReducer(
         status: ConversationScreenStatus.streaming,
         conversation: state.conversation,
-        messages: state.messages,
+        messages: messages,
         pagination: state.pagination,
         pendingSend: state.pendingSend,
         temporaryAssistantText: '',
         activeRequestId: event.requestId,
+        canonicalPendingUserId: userMessage.id,
       ),
     );
   }
@@ -213,6 +318,7 @@ final class ConversationStateReducer {
           pagination: state.pagination,
           pendingSend: state.pendingSend,
           temporaryAssistantText: state.temporaryAssistantText,
+          canonicalPendingUserId: state.canonicalPendingUserId,
           failure: ConversationFailure(
             category: ConversationFailureCategory.assistantContentTooLong,
             operation: ConversationOperation.send,
@@ -230,6 +336,7 @@ final class ConversationStateReducer {
         pendingSend: state.pendingSend,
         temporaryAssistantText: text,
         activeRequestId: state.activeRequestId,
+        canonicalPendingUserId: state.canonicalPendingUserId,
       ),
     );
   }
@@ -241,7 +348,20 @@ final class ConversationStateReducer {
     if (!_matchesRequest(state, event.requestId)) {
       return _protocol(ConversationOperation.send);
     }
-    if (!_containsPendingUserMessage(state, event.messages)) {
+    final pending = state.pendingSend;
+    final canonicalUserId = state.canonicalPendingUserId;
+    final startedUserMessage = canonicalUserId == null
+        ? null
+        : _findMessageById(state.messages, canonicalUserId);
+    final completedUserMessage = canonicalUserId == null
+        ? null
+        : _findMessageById(event.messages, canonicalUserId);
+    if (pending == null ||
+        startedUserMessage == null ||
+        completedUserMessage == null ||
+        startedUserMessage != completedUserMessage ||
+        completedUserMessage.content != pending.content ||
+        completedUserMessage.role != MessageRole.user) {
       return _protocol(ConversationOperation.send);
     }
     final merged = _mergeMessages(state.messages, event.messages);
@@ -271,9 +391,7 @@ final class ConversationStateReducer {
         failure.requestId != state.activeRequestId) {
       return _protocol(ConversationOperation.send);
     }
-    final keepPending =
-        retainPending ||
-        failure.resultCertainty == SendResultCertainty.resultUnknown;
+    final keepPending = retainPending || state.pendingSend != null;
     return StateTransition(
       ConversationScreenState.fromReducer(
         status: ConversationScreenStatus.sendFailed,
@@ -282,6 +400,7 @@ final class ConversationStateReducer {
         pagination: state.pagination,
         pendingSend: keepPending ? state.pendingSend : null,
         temporaryAssistantText: state.temporaryAssistantText,
+        canonicalPendingUserId: state.canonicalPendingUserId,
         failure: failure,
       ),
     );
@@ -309,6 +428,7 @@ final class ConversationStateReducer {
         messages: state.messages,
         pagination: state.pagination,
         pendingSend: state.pendingSend,
+        canonicalPendingUserId: state.canonicalPendingUserId,
       ),
     );
   }
@@ -338,6 +458,7 @@ final class ConversationStateReducer {
         messages: event.canonicalMessages,
         pagination: state.pagination,
         pendingSend: state.pendingSend,
+        canonicalPendingUserId: state.canonicalPendingUserId,
         failure: ConversationFailure(
           category: ConversationFailureCategory.resultUnknown,
           operation: ConversationOperation.reconciliation,
@@ -362,6 +483,7 @@ final class ConversationStateReducer {
         messages: state.messages,
         pagination: state.pagination,
         pendingSend: state.pendingSend,
+        canonicalPendingUserId: state.canonicalPendingUserId,
         failure: event.failure,
       ),
     );
@@ -372,17 +494,11 @@ final class ConversationStateReducer {
         state.activeRequestId == requestId;
   }
 
-  bool _containsPendingUserMessage(
-    ConversationScreenState state,
-    List<Message> messages,
-  ) {
-    final pendingSend = state.pendingSend;
-    if (pendingSend == null) return false;
-    return messages.any(
-      (message) =>
-          message.role == MessageRole.user &&
-          message.content == pendingSend.content,
-    );
+  Message? _findMessageById(List<Message> messages, String id) {
+    for (final message in messages) {
+      if (message.id == id) return message;
+    }
+    return null;
   }
 
   List<Message>? _initialMessages(List<Message> messages) {

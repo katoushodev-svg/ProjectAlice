@@ -29,10 +29,7 @@ void main() {
     await tester.pumpWidget(_build(gateway));
     await tester.pump();
 
-    await tester.enterText(
-      find.byType(TextField),
-      '  hello\nworld  ',
-    );
+    await tester.enterText(find.byType(TextField), '  hello\nworld  ');
     await tester.pump();
 
     expect(_composer(tester).sendEnabled, isTrue);
@@ -46,131 +43,113 @@ void main() {
     expect(_composer(tester).enabled, isFalse);
   });
 
-  testWidgets(
-    'first delta replaces thinking and later deltas are batched',
-    (tester) async {
-      final gateway = _SendGateway();
-      addTearDown(gateway.dispose);
+  testWidgets('first delta replaces thinking and later deltas are batched', (
+    tester,
+  ) async {
+    final gateway = _SendGateway();
+    addTearDown(gateway.dispose);
 
-      await tester.pumpWidget(_build(gateway));
-      await tester.pump();
-      await tester.pump();
+    await tester.pumpWidget(_build(gateway));
+    await tester.pump();
+    await tester.pump();
 
-      expect(_composer(tester).enabled, isTrue);
+    expect(_composer(tester).enabled, isTrue);
 
-      await tester.enterText(find.byType(TextField), 'hello');
-      await tester.pump();
-      await tester.tap(find.bySemanticsLabel('送信'));
-      await tester.pump();
+    await tester.enterText(find.byType(TextField), 'hello');
+    await tester.pump();
+    await tester.tap(find.bySemanticsLabel('送信'));
+    await tester.pump();
 
-      final controller = ProviderScope.containerOf(
-        tester.element(find.byType(ConversationScreen)),
-      ).read(conversationControllerProvider);
-      expect(controller.state.status, ConversationScreenStatus.sending);
-      expect(gateway.sendCount, 1);
+    final controller = ProviderScope.containerOf(
+      tester.element(find.byType(ConversationScreen)),
+    ).read(conversationControllerProvider);
+    expect(controller.state.status, ConversationScreenStatus.sending);
+    expect(gateway.sendCount, 1);
 
-      gateway.events.add(
-        StreamStarted('request-1', userMessage: _canonicalUserMessage()),
-      );
-      await tester.pump();
+    gateway.events.add(
+      StreamStarted('request-1', userMessage: _canonicalUserMessage()),
+    );
+    await tester.pump();
 
-      gateway.events.add(
-        const AssistantDelta(
-          requestId: 'request-1',
-          delta: 'one',
-        ),
-      );
-      await tester.pump();
+    gateway.events.add(
+      const AssistantDelta(requestId: 'request-1', delta: 'one'),
+    );
+    await tester.pump();
 
-      expect(find.byType(ThinkingIndicator), findsNothing);
-      expect(find.byType(StreamingAssistantMessage), findsOneWidget);
-      expect(find.text('one'), findsOneWidget);
+    expect(find.byType(ThinkingIndicator), findsNothing);
+    expect(find.byType(StreamingAssistantMessage), findsOneWidget);
+    expect(find.text('one'), findsOneWidget);
 
-      gateway.events.add(
-        const AssistantDelta(
-          requestId: 'request-1',
-          delta: ' two',
-        ),
-      );
-      await tester.pump();
+    gateway.events.add(
+      const AssistantDelta(requestId: 'request-1', delta: ' two'),
+    );
+    await tester.pump();
 
-      expect(find.text('one'), findsOneWidget);
-      expect(find.text('one two'), findsNothing);
+    expect(find.text('one'), findsOneWidget);
+    expect(find.text('one two'), findsNothing);
 
-      await tester.pump(const Duration(milliseconds: 55));
+    await tester.pump(const Duration(milliseconds: 55));
 
-      expect(find.text('one two'), findsOneWidget);
-    },
-  );
+    expect(find.text('one two'), findsOneWidget);
+  });
 
-  testWidgets(
-    'canonical completion replaces temporary assistant text',
-    (tester) async {
-      final gateway = _SendGateway();
-      addTearDown(gateway.dispose);
+  testWidgets('canonical completion replaces temporary assistant text', (
+    tester,
+  ) async {
+    final gateway = _SendGateway();
+    addTearDown(gateway.dispose);
 
-      await tester.pumpWidget(_build(gateway));
-      await tester.pump();
-      await tester.pump();
+    await tester.pumpWidget(_build(gateway));
+    await tester.pump();
+    await tester.pump();
 
-      expect(_composer(tester).enabled, isTrue);
+    expect(_composer(tester).enabled, isTrue);
 
-      await tester.enterText(find.byType(TextField), 'hello');
-      await tester.pump();
-      await tester.tap(find.bySemanticsLabel('送信'));
-      await tester.pump();
+    await tester.enterText(find.byType(TextField), 'hello');
+    await tester.pump();
+    await tester.tap(find.bySemanticsLabel('送信'));
+    await tester.pump();
 
-      final controller = ProviderScope.containerOf(
-        tester.element(find.byType(ConversationScreen)),
-      ).read(conversationControllerProvider);
-      expect(controller.state.status, ConversationScreenStatus.sending);
-      expect(gateway.sendCount, 1);
+    final controller = ProviderScope.containerOf(
+      tester.element(find.byType(ConversationScreen)),
+    ).read(conversationControllerProvider);
+    expect(controller.state.status, ConversationScreenStatus.sending);
+    expect(gateway.sendCount, 1);
 
-      gateway.events.add(
-        StreamStarted('request-1', userMessage: _canonicalUserMessage()),
-      );
-      gateway.events.add(
-        const AssistantDelta(
-          requestId: 'request-1',
-          delta: 'temporary',
-        ),
-      );
-      await tester.pump();
+    gateway.events.add(
+      StreamStarted('request-1', userMessage: _canonicalUserMessage()),
+    );
+    gateway.events.add(
+      const AssistantDelta(requestId: 'request-1', delta: 'temporary'),
+    );
+    await tester.pump();
 
-      gateway.events.add(
-        AssistantCompleted(
-          requestId: 'request-1',
-          messages: [
-            Message(
-              id: 'user-1',
-              role: MessageRole.user,
-              content: 'hello',
-              createdAt: DateTime.utc(2026, 9, 27),
-            ),
-            Message(
-              id: 'assistant-1',
-              role: MessageRole.assistant,
-              content: 'canonical',
-              createdAt: DateTime.utc(
-                2026,
-                9,
-                27,
-                0,
-                0,
-                1,
-              ),
-            ),
-          ],
-        ),
-      );
-      await tester.pump();
+    gateway.events.add(
+      AssistantCompleted(
+        requestId: 'request-1',
+        messages: [
+          Message(
+            id: 'user-1',
+            role: MessageRole.user,
+            content: 'hello',
+            createdAt: DateTime.utc(2026, 9, 27),
+          ),
+          Message(
+            id: 'assistant-1',
+            role: MessageRole.assistant,
+            content: 'canonical',
+            createdAt: DateTime.utc(2026, 9, 27, 0, 0, 1),
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
 
-      expect(find.byType(StreamingAssistantMessage), findsNothing);
-      expect(find.text('canonical'), findsOneWidget);
-      expect(find.text('temporary'), findsNothing);
-      expect(_composer(tester).enabled, isTrue);
-    },
-  );
+    expect(find.byType(StreamingAssistantMessage), findsNothing);
+    expect(find.text('canonical'), findsOneWidget);
+    expect(find.text('temporary'), findsNothing);
+    expect(_composer(tester).enabled, isTrue);
+  });
 
   testWidgets('shows the counter from 9000 code points', (tester) async {
     final gateway = _SendGateway();
@@ -179,10 +158,7 @@ void main() {
     await tester.pumpWidget(_build(gateway));
     await tester.pump();
 
-    await tester.enterText(
-      find.byType(TextField),
-      'a' * 9000,
-    );
+    await tester.enterText(find.byType(TextField), 'a' * 9000);
     await tester.pump();
 
     expect(find.text('9000 / 10,000'), findsOneWidget);
@@ -191,9 +167,7 @@ void main() {
 
 Widget _build(_SendGateway gateway) {
   return ProviderScope(
-    overrides: [
-      conversationGatewayProvider.overrideWithValue(gateway),
-    ],
+    overrides: [conversationGatewayProvider.overrideWithValue(gateway)],
     child: MaterialApp(
       theme: AliceTheme.darkTheme,
       home: const ConversationScreen(),
@@ -218,21 +192,14 @@ final class _SendGateway implements ConversationGateway {
   Future<GatewayResult<MessagePage>> getMessages({
     int limit = 50,
     String? cursor,
-  }) =>
-      Future.value(
-        GatewaySuccess(
-          MessagePage(
-            messages: const [],
-            nextCursor: null,
-            hasMore: false,
-          ),
-        ),
-      );
+  }) => Future.value(
+    GatewaySuccess(
+      MessagePage(messages: const [], nextCursor: null, hasMore: false),
+    ),
+  );
 
   @override
-  Stream<ConversationSendEvent> sendMessage(
-    OutgoingMessage outgoingMessage,
-  ) {
+  Stream<ConversationSendEvent> sendMessage(OutgoingMessage outgoingMessage) {
     sendCount++;
     return events.stream;
   }

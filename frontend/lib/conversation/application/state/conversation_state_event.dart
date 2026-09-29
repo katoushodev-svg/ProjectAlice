@@ -51,16 +51,43 @@ final class OlderPageLoadFailed extends ConversationStateEvent {
   final ConversationFailure failure;
 }
 
+final class LatestPageReconciliationStarted extends ConversationStateEvent {
+  const LatestPageReconciliationStarted();
+}
+
+final class LatestPageReconciliationSucceeded extends ConversationStateEvent {
+  const LatestPageReconciliationSucceeded(this.page);
+
+  final MessagePage page;
+}
+
+final class LatestPageReconciliationFailed extends ConversationStateEvent {
+  const LatestPageReconciliationFailed(this.failure);
+
+  final ConversationFailure failure;
+}
+
 final class SendStarted extends ConversationStateEvent {
   const SendStarted(this.outgoingMessage);
 
   final OutgoingMessage outgoingMessage;
 }
 
+final class RecoverySendStarted extends ConversationStateEvent {
+  const RecoverySendStarted(
+    this.outgoingMessage, {
+    this.preserveCanonicalUserId = true,
+  });
+
+  final OutgoingMessage outgoingMessage;
+  final bool preserveCanonicalUserId;
+}
+
 final class StreamStarted extends ConversationStateEvent {
-  const StreamStarted(this.requestId);
+  const StreamStarted(this.requestId, {this.userMessage});
 
   final String requestId;
+  final Message? userMessage;
 }
 
 final class AssistantDeltaReceived extends ConversationStateEvent {

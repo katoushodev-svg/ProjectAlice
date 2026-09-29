@@ -18,9 +18,7 @@ void main() {
       allowLocalHttp: true,
     );
     final container = ProviderContainer(
-      overrides: [
-        appConfigurationProvider.overrideWithValue(configuration),
-      ],
+      overrides: [appConfigurationProvider.overrideWithValue(configuration)],
     );
     addTearDown(container.dispose);
 
@@ -58,12 +56,11 @@ final class _FakeGateway implements ConversationGateway {
   Future<GatewayResult<MessagePage>> getMessages({
     int limit = 50,
     String? cursor,
-  }) =>
-      Future.value(
-        GatewaySuccess(
-          MessagePage(messages: const [], nextCursor: null, hasMore: false),
-        ),
-      );
+  }) => Future.value(
+    GatewaySuccess(
+      MessagePage(messages: const [], nextCursor: null, hasMore: false),
+    ),
+  );
 
   @override
   Stream<ConversationSendEvent> sendMessage(OutgoingMessage outgoingMessage) =>

@@ -1,14 +1,18 @@
 enum ConversationFailureCategory {
   validation,
+  invalidCursor,
   conversationBusy,
   requestInProgress,
   idempotencyConflict,
   generationFailed,
   responseTimeout,
+  messageSaveFailed,
+  requestInterrupted,
   networkUnavailable,
   resultUnknown,
   protocolViolation,
   responseTooLarge,
+  requestBodyTooLarge,
   sseFrameTooLarge,
   sseStreamTooLarge,
   assistantContentTooLong,
@@ -27,12 +31,16 @@ final class ConversationFailure {
     required this.operation,
     this.resultCertainty,
     this.requestId,
+    this.retryAfter,
+    this.terminalStreamFailure = false,
   });
 
   final ConversationFailureCategory category;
   final ConversationOperation operation;
   final SendResultCertainty? resultCertainty;
   final String? requestId;
+  final Duration? retryAfter;
+  final bool terminalStreamFailure;
 
   @override
   bool operator ==(Object other) {
@@ -40,12 +48,20 @@ final class ConversationFailure {
         other.category == category &&
         other.operation == operation &&
         other.resultCertainty == resultCertainty &&
-        other.requestId == requestId;
+        other.requestId == requestId &&
+        other.retryAfter == retryAfter &&
+        other.terminalStreamFailure == terminalStreamFailure;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(category, operation, resultCertainty, requestId);
+  int get hashCode => Object.hash(
+    category,
+    operation,
+    resultCertainty,
+    requestId,
+    retryAfter,
+    terminalStreamFailure,
+  );
 
   @override
   String toString() => 'ConversationFailure($category, $operation)';

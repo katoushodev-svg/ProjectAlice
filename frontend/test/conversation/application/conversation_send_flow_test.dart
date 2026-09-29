@@ -32,69 +32,72 @@ void main() {
     );
   });
 
-  test('generates one UUID per logical send and keeps it through streaming', () async {
-    final stream = StreamController<ConversationSendEvent>();
-    final generator = _FakeKeyGenerator();
-    final gateway = _FakeGateway(sendStream: stream.stream);
-    final controller = ConversationController(
-      gateway: gateway,
-      idempotencyKeyGenerator: generator,
-    );
-    addTearDown(() async {
-      await stream.close();
-      controller.dispose();
-    });
+  test(
+    'generates one UUID per logical send and keeps it through streaming',
+    () async {
+      final stream = StreamController<ConversationSendEvent>();
+      final generator = _FakeKeyGenerator();
+      final gateway = _FakeGateway(sendStream: stream.stream);
+      final controller = ConversationController(
+        gateway: gateway,
+        idempotencyKeyGenerator: generator,
+      );
+      addTearDown(() async {
+        await stream.close();
+        controller.dispose();
+      });
 
-    await controller.loadInitial();
+      await controller.loadInitial();
 
-    expect(controller.send('  hello\nworld  '), isTrue);
-    expect(generator.calls, 1);
-    expect(gateway.sent.single.content, '  hello\nworld  ');
-    final firstKey = gateway.sent.single.idempotencyKey;
+      expect(controller.send('  hello\nworld  '), isTrue);
+      expect(generator.calls, 1);
+      expect(gateway.sent.single.content, '  hello\nworld  ');
+      final firstKey = gateway.sent.single.idempotencyKey;
 
-    final canonicalUserMessage = Message(
-      id: 'user-1',
-      role: MessageRole.user,
-      content: '  hello\nworld  ',
-      createdAt: DateTime.utc(2026, 9, 27),
-    );
-    stream.add(
-      StreamStarted('request-1', userMessage: canonicalUserMessage),
-    );
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.state.status, ConversationScreenStatus.streaming);
+      final canonicalUserMessage = Message(
+        id: 'user-1',
+        role: MessageRole.user,
+        content: '  hello\nworld  ',
+        createdAt: DateTime.utc(2026, 9, 27),
+      );
+      stream.add(StreamStarted('request-1', userMessage: canonicalUserMessage));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.status, ConversationScreenStatus.streaming);
 
-    stream.add(const AssistantDelta(requestId: 'request-1', delta: 'first'));
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.state.temporaryAssistantText, 'first');
+      stream.add(const AssistantDelta(requestId: 'request-1', delta: 'first'));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.temporaryAssistantText, 'first');
 
-    stream.add(const AssistantDelta(requestId: 'request-1', delta: ' second'));
-    await Future<void>.delayed(const Duration(milliseconds: 60));
-    expect(controller.state.temporaryAssistantText, 'first second');
+      stream.add(
+        const AssistantDelta(requestId: 'request-1', delta: ' second'),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(controller.state.temporaryAssistantText, 'first second');
 
-    stream.add(
-      AssistantCompleted(
-        requestId: 'request-1',
-        messages: [
-          canonicalUserMessage,
-          Message(
-            id: 'assistant-1',
-            role: MessageRole.assistant,
-            content: 'canonical',
-            createdAt: DateTime.utc(2026, 9, 27, 0, 0, 1),
-          ),
-        ],
-      ),
-    );
-    await Future<void>.delayed(Duration.zero);
+      stream.add(
+        AssistantCompleted(
+          requestId: 'request-1',
+          messages: [
+            canonicalUserMessage,
+            Message(
+              id: 'assistant-1',
+              role: MessageRole.assistant,
+              content: 'canonical',
+              createdAt: DateTime.utc(2026, 9, 27, 0, 0, 1),
+            ),
+          ],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
 
-    expect(controller.state.status, ConversationScreenStatus.ready);
-    expect(controller.state.temporaryAssistantText, isNull);
-    expect(controller.state.pendingSend, isNull);
-    expect(controller.state.messages.last.content, 'canonical');
-    expect(generator.calls, 1);
-    expect(gateway.sent.single.idempotencyKey, firstKey);
-  });
+      expect(controller.state.status, ConversationScreenStatus.ready);
+      expect(controller.state.temporaryAssistantText, isNull);
+      expect(controller.state.pendingSend, isNull);
+      expect(controller.state.messages.last.content, 'canonical');
+      expect(generator.calls, 1);
+      expect(gateway.sent.single.idempotencyKey, firstKey);
+    },
+  );
 
   test('does not create a second send while sending', () async {
     final stream = StreamController<ConversationSendEvent>();
@@ -142,12 +145,11 @@ final class _FakeGateway implements ConversationGateway {
   Future<GatewayResult<MessagePage>> getMessages({
     int limit = 50,
     String? cursor,
-  }) =>
-      Future.value(
-        GatewaySuccess(
-          MessagePage(messages: const [], nextCursor: null, hasMore: false),
-        ),
-      );
+  }) => Future.value(
+    GatewaySuccess(
+      MessagePage(messages: const [], nextCursor: null, hasMore: false),
+    ),
+  );
 
   @override
   Stream<ConversationSendEvent> sendMessage(OutgoingMessage outgoingMessage) {

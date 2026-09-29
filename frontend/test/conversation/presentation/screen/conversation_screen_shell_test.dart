@@ -28,6 +28,8 @@ void main() {
     Size viewInsets = Size.zero,
     List<Widget> messageItems = const [],
     TextScaler textScaler = TextScaler.noScaling,
+    bool showLatestButton = false,
+    VoidCallback? onLatestTap,
   }) {
     final controller = TextEditingController();
     final focusNode = FocusNode();
@@ -52,6 +54,8 @@ void main() {
             focusNode: focusNode,
             scrollController: scrollController,
             onSend: () {},
+            showLatestButton: showLatestButton,
+            onLatestTap: onLatestTap,
           ),
         ),
       ),
@@ -120,5 +124,24 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(ComposerPanel), findsOneWidget);
+  });
+
+  testWidgets('exposes the latest action with a 44pt target and semantics', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    var tapped = false;
+    await tester.pumpWidget(
+      buildTestable(showLatestButton: true, onLatestTap: () => tapped = true),
+    );
+
+    final finder = find.bySemanticsLabel('最新のメッセージへ移動');
+    expect(finder, findsOneWidget);
+    final size = tester.getSize(finder);
+    expect(size.width, greaterThanOrEqualTo(44));
+    expect(size.height, greaterThanOrEqualTo(44));
+    await tester.tap(finder);
+    expect(tapped, isTrue);
   });
 }

@@ -6,10 +6,6 @@ import '../layout/conversation_layout_metrics.dart';
 import 'message_text_field.dart';
 import 'send_button.dart';
 
-/// Bottom Composer: Draft Field, optional Validation Slot and Send Button.
-///
-/// Pure Presentation only: no Validation, UUID generation, HTTP/SSE, Draft
-/// Clear/Restore, or Application State judgement happens here.
 class ComposerPanel extends StatelessWidget {
   const ComposerPanel({
     super.key,
@@ -20,6 +16,8 @@ class ComposerPanel extends StatelessWidget {
     required this.onSend,
     this.validationMessage,
     this.onDraftChanged,
+    this.characterCount = 0,
+    this.showCharacterCount = false,
   });
 
   final TextEditingController draftController;
@@ -29,9 +27,13 @@ class ComposerPanel extends StatelessWidget {
   final VoidCallback onSend;
   final String? validationMessage;
   final ValueChanged<String>? onDraftChanged;
+  final int characterCount;
+  final bool showCharacterCount;
 
   @override
   Widget build(BuildContext context) {
+    final counter = '$characterCount / 10,000';
+
     return ConstrainedBox(
       constraints: const BoxConstraints(
         minHeight: ConversationLayoutMetrics.composerMinHeight,
@@ -68,14 +70,33 @@ class ComposerPanel extends StatelessWidget {
                   ],
                 ),
               ),
-              if (validationMessage != null)
+              if (validationMessage != null || showCharacterCount)
                 Padding(
                   padding: const EdgeInsets.only(top: 4.0),
-                  child: Text(
-                    validationMessage!,
-                    style: AliceTextStyles.caption.copyWith(
-                      color: AliceColorTokens.error,
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      if (validationMessage != null)
+                        Expanded(
+                          child: Text(
+                            validationMessage!,
+                            style: AliceTextStyles.caption.copyWith(
+                              color: AliceColorTokens.error,
+                            ),
+                          ),
+                        )
+                      else
+                        const Spacer(),
+                      if (showCharacterCount)
+                        Text(
+                          counter,
+                          style: AliceTextStyles.caption.copyWith(
+                            color: characterCount > 10000
+                                ? AliceColorTokens.error
+                                : AliceColorTokens.textSecondary,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
             ],

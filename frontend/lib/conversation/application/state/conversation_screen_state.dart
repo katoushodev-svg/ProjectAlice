@@ -9,6 +9,7 @@ enum ConversationScreenStatus {
   initialLoading,
   ready,
   loadingOlder,
+  reconcilingHistory,
   sending,
   streaming,
   sendFailed,
@@ -43,6 +44,7 @@ final class ConversationScreenState {
     required this.pagination,
     required this.pendingSend,
     required this.activeRequestId,
+    required this.canonicalPendingUserId,
     required this.failure,
   }) : messages = UnmodifiableListView<Message>(List<Message>.of(messages)) {
     _validate();
@@ -57,6 +59,7 @@ final class ConversationScreenState {
       pagination: ConversationPaginationState.initial(),
       pendingSend: null,
       activeRequestId: null,
+      canonicalPendingUserId: null,
       failure: null,
     );
   }
@@ -68,6 +71,7 @@ final class ConversationScreenState {
   final ConversationPaginationState pagination;
   final OutgoingMessage? pendingSend;
   final String? activeRequestId;
+  final String? canonicalPendingUserId;
   final ConversationFailure? failure;
 
   static ConversationScreenState fromReducer({
@@ -78,6 +82,7 @@ final class ConversationScreenState {
     ConversationPaginationState? pagination,
     OutgoingMessage? pendingSend,
     String? activeRequestId,
+    String? canonicalPendingUserId,
     ConversationFailure? failure,
   }) {
     return ConversationScreenState._(
@@ -88,6 +93,7 @@ final class ConversationScreenState {
       pagination: pagination ?? ConversationPaginationState.initial(),
       pendingSend: pendingSend,
       activeRequestId: activeRequestId,
+      canonicalPendingUserId: canonicalPendingUserId,
       failure: failure,
     );
   }
@@ -100,6 +106,7 @@ final class ConversationScreenState {
     ConversationPaginationState? pagination,
     Object? pendingSend = _unchanged,
     Object? activeRequestId = _unchanged,
+    Object? canonicalPendingUserId = _unchanged,
     Object? failure = _unchanged,
   }) {
     return ConversationScreenState._(
@@ -118,6 +125,9 @@ final class ConversationScreenState {
       activeRequestId: identical(activeRequestId, _unchanged)
           ? this.activeRequestId
           : activeRequestId as String?,
+      canonicalPendingUserId: identical(canonicalPendingUserId, _unchanged)
+          ? this.canonicalPendingUserId
+          : canonicalPendingUserId as String?,
       failure: identical(failure, _unchanged)
           ? this.failure
           : failure as ConversationFailure?,
@@ -145,6 +155,15 @@ final class ConversationScreenState {
         if (!pagination.hasMore || pagination.nextCursor == null) {
           throw ArgumentError('Invalid older-page loading state.');
         }
+      case ConversationScreenStatus.reconcilingHistory:
+        if (!pagination.hasMore ||
+            pagination.nextCursor == null ||
+            pendingSend != null ||
+            activeRequestId != null ||
+            hasTemporaryText ||
+            failure != null) {
+          throw ArgumentError('Invalid history reconciliation state.');
+        }
         if (pendingSend != null ||
             activeRequestId != null ||
             hasTemporaryText) {
@@ -158,9 +177,7 @@ final class ConversationScreenState {
           throw ArgumentError('Sending cannot have temporary text.');
         }
       case ConversationScreenStatus.streaming:
-        if (pendingSend == null ||
-            activeRequestId == null ||
-            !hasTemporaryText) {
+        if (pendingSend == null || activeRequestId == null) {
           throw ArgumentError('Invalid streaming state.');
         }
         if (failure != null) {
