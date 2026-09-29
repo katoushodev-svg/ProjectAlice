@@ -243,3 +243,12 @@ Tool Definition、Registry、Connector Binding、Connector-specific validation /
 この昇格はPhase 3の既存Permission / Approval / Risk / Durable Intent / Idempotency / Unknown Outcome semanticsを変更しない。Phase 3のToolOperationを無制限Agent Authorityへ昇格しない。
 
 Document metadataの`Draft — Detailed Design in Progress`はProject statusと不一致のためCross-Phase Metadata整合時に`Design Complete`へ更新する。
+
+## Phase 1 — Formal Completion
+
+- Status: **COMPLETE**
+- Completion date: **2026-09-29**
+- PR: **#11** (merged into `main`)
+- Merge commit: **`2beeaca`**
+- Verification: `flutter analyze` PASS / `flutter test` PASS (**233 tests**) / `git diff --check` PASS / Simulator manual verification PASS
+

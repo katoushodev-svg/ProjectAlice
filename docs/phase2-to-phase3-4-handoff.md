@@ -111,3 +111,12 @@ Phase 4 must preserve these invariants:
 | `phase2-detailed-design-final-review.md` | Version 2 — Passed; Critical / High Open 0 |
 
 This file is ready to be used as the first input for the Phase 3 Requirements Review.
+
+## Phase 1 — Formal Completion
+
+- Status: **COMPLETE**
+- Completion date: **2026-09-29**
+- PR: **#11** (merged into `main`)
+- Merge commit: **`2beeaca`**
+- Verification: `flutter analyze` PASS / `flutter test` PASS (**233 tests**) / `git diff --check` PASS / Simulator manual verification PASS
+

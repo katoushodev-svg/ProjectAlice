@@ -1943,3 +1943,12 @@ Calendar固有Failureは共通ErrorへMappingする。
 TOOL3-082〜114の承認後、次はWeb / Search、GitHubおよびAWS Capability Boundaryをまとめて設計する。Read / Write Capability、Source of Truth、Freshness、External Commit、Pagination、Rate Limit、Provider固有型隔離およびPhase 4 Fallback境界を確定する。
 
 Apple Connector Runtime Transport、Device Registration、Public API、DynamoDB Schema、OS Permission UX、Calendar Field上限、Retry / Reconciliation時間および実装対象OS Versionは、Phase 3 API、Database、Security、FrontendおよびTest Designで最終確定する。
+
+## Phase 1 — Formal Completion
+
+- Status: **COMPLETE**
+- Completion date: **2026-09-29**
+- PR: **#11** (merged into `main`)
+- Merge commit: **`2beeaca`**
+- Verification: `flutter analyze` PASS / `flutter test` PASS (**233 tests**) / `git diff --check` PASS / Simulator manual verification PASS
+

@@ -71,3 +71,12 @@ Phase 1〜4 Cross-Phase Design Consistency Reviewで承認されたFinding修正
 2. FIP-003〜012 Re-review
 3. Phase 0 Final Design Review
 4. Only after PASS: resume implementation from FIP-003
+
+## Phase 1 — Formal Completion
+
+- Status: **COMPLETE**
+- Completion date: **2026-09-29**
+- PR: **#11** (merged into `main`)
+- Merge commit: **`2beeaca`**
+- Verification: `flutter analyze` PASS / `flutter test` PASS (**233 tests**) / `git diff --check` PASS / Simulator manual verification PASS
+

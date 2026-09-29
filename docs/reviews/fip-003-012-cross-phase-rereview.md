@@ -57,3 +57,12 @@ Terminology / future-note corrections only:
 All FIP plans are ready for implementation planning execution, but implementation remains prohibited until the Phase 0 Final Design Review passes.
 
 After Phase 0 Final Design Review PASS, implementation resumes from FIP-003 in dependency order.
+
+## Phase 1 — Formal Completion
+
+- Status: **COMPLETE**
+- Completion date: **2026-09-29**
+- PR: **#11** (merged into `main`)
+- Merge commit: **`2beeaca`**
+- Verification: `flutter analyze` PASS / `flutter test` PASS (**233 tests**) / `git diff --check` PASS / Simulator manual verification PASS
+
