@@ -3,3 +3,8 @@
 
 # Local VS Code settings
 .vscode/
+
+# Java / Maven
+**/target/
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
