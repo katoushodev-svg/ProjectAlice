@@ -10,6 +10,7 @@ import com.projectalice.backend.memory.domain.SensitivityLevel;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
@@ -93,6 +94,33 @@ final class DynamoDbPersonalMemoryMapper {
         item.put("changeSource", string("MANAGEMENT_API"));
         item.put("sourceReferences", list());
         item.put("reasonCode", string("INITIAL_SAVE"));
+        return item;
+    }
+
+    static Map<String, AttributeValue> toUpdateRevisionItem(
+            PersonalMemory before,
+            PersonalMemory after,
+            long expectedVersion,
+            long nextVersion,
+            List<String> changedFields,
+            String reasonCode) {
+        Map<String, AttributeValue> item = new HashMap<>();
+        item.put("pk", string("MEMORY#" + after.memoryId().value()));
+        item.put("sk", string("REVISION#%020d".formatted(nextVersion)));
+        item.put("itemType", string("MEMORY_REVISION"));
+        item.put("schemaVersion", number(1));
+        item.put("memoryId", string(after.memoryId().value()));
+        item.put("revisionNumber", number(nextVersion));
+        item.put("beforeVersion", number(expectedVersion));
+        item.put("afterVersion", number(nextVersion));
+        item.put("changeType", string("UPDATE"));
+        item.put("changedFields", list(changedFields.toArray(new String[0])));
+        item.put("beforeSnapshot", AttributeValue.builder().m(snapshot(before)).build());
+        item.put("afterSnapshot", AttributeValue.builder().m(snapshot(after)).build());
+        item.put("changedAt", string(after.updatedAt().toString()));
+        item.put("changeSource", string("MANAGEMENT_API"));
+        item.put("sourceReferences", list());
+        item.put("reasonCode", string(reasonCode));
         return item;
     }
 

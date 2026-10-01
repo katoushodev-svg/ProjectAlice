@@ -53,5 +53,10 @@ class RegisterMemoryServiceTest {
 
         @Override
         public Optional<PersonalMemory> findById(MemoryId memoryId) { return Optional.empty(); }
+
+        @Override
+        public void update(PersonalMemory memory, long expectedVersion) {
+            throw new UnsupportedOperationException("not used by this test");
+        }
     }
 }

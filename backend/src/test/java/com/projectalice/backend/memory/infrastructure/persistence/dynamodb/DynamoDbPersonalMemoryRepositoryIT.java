@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.projectalice.backend.memory.application.port.out.MemoryUpdateConflictException;
 import com.projectalice.backend.memory.domain.CaptureType;
 import com.projectalice.backend.memory.domain.MemoryCategory;
 import com.projectalice.backend.memory.domain.MemoryContent;
 import com.projectalice.backend.memory.domain.MemoryId;
+import com.projectalice.backend.memory.domain.MemoryState;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import com.projectalice.backend.memory.domain.SensitivityLevel;
 import java.net.URI;
@@ -220,6 +222,136 @@ class DynamoDbPersonalMemoryRepositoryIT {
                 .item();
 
         assertEquals(true, memoryItem.isEmpty());;
+    }
+
+    @Test
+    void updateAppliesChangesIncrementsVersionAndWritesRevision() {
+        PersonalMemory memory = sampleMemory();
+        repository.save(memory);
+
+        OffsetDateTime changedAt = memory.updatedAt().plusMinutes(5);
+        memory.update(
+                new MemoryContent("Project Alice now also uses Dart."),
+                MemoryCategory.PROJECT,
+                SensitivityLevel.SENSITIVE,
+                MemoryState.RESOLVED,
+                changedAt);
+
+        repository.update(memory, 1L);
+
+        PersonalMemory restored = repository.findById(memory.memoryId()).orElseThrow();
+        assertEquals("Project Alice now also uses Dart.", restored.content().value());
+        assertEquals(MemoryCategory.PROJECT, restored.category());
+        assertEquals(SensitivityLevel.SENSITIVE, restored.sensitivityLevel());
+        assertEquals(MemoryState.RESOLVED, restored.state());
+        assertEquals(2, restored.version());
+        assertEquals(changedAt, restored.updatedAt());
+        assertEquals(changedAt, restored.confirmedAt());
+
+        Map<String, AttributeValue> revisionItem = client.getItem(request -> request
+                .tableName(tableName)
+                .key(Map.of(
+                        "pk", AttributeValue.builder().s("MEMORY#" + memory.memoryId().value()).build(),
+                        "sk", AttributeValue.builder().s("REVISION#00000000000000000002").build())))
+                .item();
+
+        assertNotNull(revisionItem);
+        assertEquals("MEMORY_REVISION", revisionItem.get("itemType").s());
+        assertEquals("1", revisionItem.get("beforeVersion").n());
+        assertEquals("2", revisionItem.get("afterVersion").n());
+        assertEquals("UPDATE", revisionItem.get("changeType").s());
+    }
+
+    @Test
+    void updateRevisionSnapshotsReflectConfirmedAtAsChangedAt() {
+        PersonalMemory memory = sampleMemory();
+        repository.save(memory);
+
+        OffsetDateTime changedAt = memory.updatedAt().plusMinutes(5);
+        memory.update(
+                new MemoryContent("Project Alice now also uses Dart."),
+                memory.category(),
+                memory.sensitivityLevel(),
+                memory.state(),
+                changedAt);
+
+        repository.update(memory, 1L);
+
+        Map<String, AttributeValue> revisionItem = client.getItem(request -> request
+                .tableName(tableName)
+                .key(Map.of(
+                        "pk", AttributeValue.builder().s("MEMORY#" + memory.memoryId().value()).build(),
+                        "sk", AttributeValue.builder().s("REVISION#00000000000000000002").build())))
+                .item();
+
+        assertNotNull(revisionItem);
+        assertNull(revisionItem.get("beforeSnapshot").m().get("confirmedAt"));
+        assertEquals(
+                changedAt.toString(),
+                revisionItem.get("afterSnapshot").m().get("confirmedAt").s());
+    }
+
+    @Test
+    void updateWithStaleExpectedVersionDoesNotChangePersistedMemory() {
+        PersonalMemory memory = sampleMemory();
+        repository.save(memory);
+
+        OffsetDateTime firstChangeAt = memory.updatedAt().plusMinutes(5);
+        memory.update(
+                new MemoryContent("First revision content."),
+                memory.category(),
+                memory.sensitivityLevel(),
+                memory.state(),
+                firstChangeAt);
+        repository.update(memory, 1L);
+
+        PersonalMemory staleAttempt = PersonalMemory.reconstitute(
+                memory.memoryId(),
+                new MemoryContent("Attempted stale update."),
+                memory.category(),
+                memory.captureType(),
+                memory.sensitivityLevel(),
+                memory.state(),
+                2,
+                memory.createdAt(),
+                firstChangeAt.plusMinutes(5),
+                firstChangeAt.plusMinutes(5));
+
+        assertThrows(MemoryUpdateConflictException.class,
+                () -> repository.update(staleAttempt, 1L));
+
+        PersonalMemory restored = repository.findById(memory.memoryId()).orElseThrow();
+        assertEquals(2, restored.version());
+        assertEquals("First revision content.", restored.content().value());
+    }
+
+    @Test
+    void updateDoesNotChangeMemoryWhenRevisionAlreadyExists() {
+        PersonalMemory memory = sampleMemory();
+        repository.save(memory);
+
+        client.putItem(request -> request
+                .tableName(tableName)
+                .item(Map.of(
+                        "pk", AttributeValue.builder()
+                                .s("MEMORY#" + memory.memoryId().value())
+                                .build(),
+                        "sk", AttributeValue.builder()
+                                .s("REVISION#00000000000000000002")
+                                .build())));
+
+        OffsetDateTime changedAt = memory.updatedAt().plusMinutes(5);
+        memory.update(
+                new MemoryContent("Should not be persisted."),
+                memory.category(),
+                memory.sensitivityLevel(),
+                memory.state(),
+                changedAt);
+
+        assertThrows(MemoryUpdateConflictException.class, () -> repository.update(memory, 1L));
+        PersonalMemory restored = repository.findById(memory.memoryId()).orElseThrow();
+        assertEquals(1, restored.version());
+        assertEquals(memory.createdAt(), restored.updatedAt());
     }
 
     private static PersonalMemory sampleMemory() {
