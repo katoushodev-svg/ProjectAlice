@@ -2,12 +2,14 @@ package com.projectalice.backend.memory.infrastructure.persistence.dynamodb;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.projectalice.backend.memory.domain.CaptureType;
 import com.projectalice.backend.memory.domain.MemoryCategory;
 import com.projectalice.backend.memory.domain.MemoryContent;
+import com.projectalice.backend.memory.domain.MemoryId;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import com.projectalice.backend.memory.domain.SensitivityLevel;
 import java.net.URI;
@@ -125,6 +127,43 @@ class DynamoDbPersonalMemoryRepositoryIT {
         assertEquals("1", revisionItem.get("afterVersion").n());
         assertEquals(4, revisionItem.get("changedFields").l().size());
     }
+
+        @Test
+        void findByIdRestoresSavedMemoryFields() {
+                PersonalMemory memory = sampleMemory();
+                OffsetDateTime confirmedAt = memory.createdAt().plusMinutes(5);
+                memory.confirm(confirmedAt);
+
+                repository.save(memory);
+
+                PersonalMemory restored = repository.findById(memory.memoryId()).orElseThrow();
+
+                assertEquals(memory.memoryId(), restored.memoryId());
+                assertEquals(memory.content(), restored.content());
+                assertEquals(memory.category(), restored.category());
+                assertEquals(memory.captureType(), restored.captureType());
+                assertEquals(memory.sensitivityLevel(), restored.sensitivityLevel());
+                assertEquals(memory.state(), restored.state());
+                assertEquals(memory.version(), restored.version());
+                assertEquals(memory.createdAt(), restored.createdAt());
+                assertEquals(memory.updatedAt(), restored.updatedAt());
+                assertEquals(confirmedAt, restored.confirmedAt());
+        }
+
+        @Test
+        void findByIdReturnsEmptyWhenMemoryDoesNotExist() {
+                assertTrue(repository.findById(MemoryId.generate()).isEmpty());
+        }
+
+        @Test
+        void findByIdRestoresNullConfirmedAtWhenAttributeIsAbsent() {
+                PersonalMemory memory = sampleMemory();
+                repository.save(memory);
+
+                PersonalMemory restored = repository.findById(memory.memoryId()).orElseThrow();
+
+                assertNull(restored.confirmedAt());
+        }
 
     @Test
     void duplicateSaveIsRejectedWithoutOverwritingExistingItems() {

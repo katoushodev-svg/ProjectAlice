@@ -8,12 +8,14 @@ import com.projectalice.backend.memory.application.port.out.PersonalMemoryReposi
 import com.projectalice.backend.memory.domain.CaptureType;
 import com.projectalice.backend.memory.domain.MemoryCategory;
 import com.projectalice.backend.memory.domain.MemoryContent;
+import com.projectalice.backend.memory.domain.MemoryId;
 import com.projectalice.backend.memory.domain.MemoryState;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import com.projectalice.backend.memory.domain.SensitivityLevel;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class RegisterMemoryServiceTest {
@@ -48,5 +50,8 @@ class RegisterMemoryServiceTest {
         private PersonalMemory saved;
         @Override
         public void save(PersonalMemory memory) { this.saved = memory; }
+
+        @Override
+        public Optional<PersonalMemory> findById(MemoryId memoryId) { return Optional.empty(); }
     }
 }

@@ -1,9 +1,17 @@
 package com.projectalice.backend.memory.infrastructure.persistence.dynamodb;
 
+import com.projectalice.backend.memory.domain.CaptureType;
+import com.projectalice.backend.memory.domain.MemoryCategory;
+import com.projectalice.backend.memory.domain.MemoryContent;
+import com.projectalice.backend.memory.domain.MemoryId;
+import com.projectalice.backend.memory.domain.MemoryState;
 import com.projectalice.backend.memory.domain.PersonalMemory;
+import com.projectalice.backend.memory.domain.SensitivityLevel;
+import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 final class DynamoDbPersonalMemoryMapper {
@@ -30,6 +38,43 @@ final class DynamoDbPersonalMemoryMapper {
             item.put("confirmedAt", string(memory.confirmedAt().toString()));
         }
         return item;
+    }
+
+    static PersonalMemory toDomain(Map<String, AttributeValue> item) {
+        Objects.requireNonNull(item, "item must not be null");
+
+        MemoryId memoryId = new MemoryId(requiredString(item, "memoryId"));
+        MemoryContent content = new MemoryContent(requiredString(item, "content"));
+        MemoryCategory category = MemoryCategory.valueOf(requiredString(item, "category"));
+        CaptureType captureType = CaptureType.valueOf(requiredString(item, "captureType"));
+        SensitivityLevel sensitivityLevel = SensitivityLevel.valueOf(
+                requiredString(item, "sensitivityLevel"));
+        MemoryState state = MemoryState.valueOf(requiredString(item, "memoryState"));
+        long version = requiredLong(item, "version");
+        OffsetDateTime createdAt = OffsetDateTime.parse(requiredString(item, "createdAt"));
+        OffsetDateTime updatedAt = OffsetDateTime.parse(requiredString(item, "updatedAt"));
+
+        AttributeValue confirmedAtAttribute = item.get("confirmedAt");
+        OffsetDateTime confirmedAt = null;
+        if (confirmedAtAttribute != null) {
+            String confirmedAtValue = confirmedAtAttribute.s();
+            if (confirmedAtValue == null) {
+                throw new IllegalArgumentException("Invalid confirmedAt attribute: expected a string");
+            }
+            confirmedAt = OffsetDateTime.parse(confirmedAtValue);
+        }
+
+        return PersonalMemory.reconstitute(
+                memoryId,
+                content,
+                category,
+                captureType,
+                sensitivityLevel,
+                state,
+                version,
+                createdAt,
+                updatedAt,
+                confirmedAt);
     }
 
     static Map<String, AttributeValue> toCreateRevisionItem(PersonalMemory memory) {
@@ -67,6 +112,29 @@ final class DynamoDbPersonalMemoryMapper {
 
     private static AttributeValue string(String value) {
         return AttributeValue.builder().s(value).build();
+    }
+
+    private static String requiredString(Map<String, AttributeValue> item, String attributeName) {
+        AttributeValue attribute = item.get(attributeName);
+        if (attribute == null || attribute.s() == null) {
+            throw new IllegalArgumentException(
+                    "Missing or invalid required string attribute: " + attributeName);
+        }
+        return attribute.s();
+    }
+
+    private static long requiredLong(Map<String, AttributeValue> item, String attributeName) {
+        AttributeValue attribute = item.get(attributeName);
+        if (attribute == null || attribute.n() == null) {
+            throw new IllegalArgumentException(
+                    "Missing or invalid required numeric attribute: " + attributeName);
+        }
+        try {
+            return Long.parseLong(attribute.n());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "Invalid required numeric attribute: " + attributeName, exception);
+        }
     }
 
     private static AttributeValue number(long value) {
