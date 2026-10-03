@@ -11,8 +11,8 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Candidate generation, authoritative hydration, eligibility filtering, then a pluggable ranking stage.
- * Deduplication and budget enforcement are deferred.
+ * Candidate generation, authoritative hydration, eligibility filtering, then ranking,
+ * deduplication and diversity stages.
  */
 public final class FindRelevantMemoriesService implements FindRelevantMemoriesUseCase {
 
@@ -20,17 +20,41 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
     private final PersonalMemoryRepository personalMemoryRepository;
     private final MemoryEligibilityPolicy eligibilityPolicy = new MemoryEligibilityPolicy();
     private final MemoryRelevanceRankingPolicy rankingPolicy;
+    private final MemoryDeduplicationPolicy deduplicationPolicy;
+    private final MemoryDiversityPolicy diversityPolicy;
 
     public FindRelevantMemoriesService(
             AnswerMemorySearchPort searchPort, PersonalMemoryRepository personalMemoryRepository) {
-        this(searchPort, personalMemoryRepository, MemoryRelevanceRankingPolicy.preservingInputOrder());
+        this(
+                searchPort,
+                personalMemoryRepository,
+                MemoryRelevanceRankingPolicy.preservingInputOrder(),
+                MemoryDeduplicationPolicy.preservingCandidates(),
+                MemoryDiversityPolicy.preservingCandidates());
     }
 
     public FindRelevantMemoriesService(
             AnswerMemorySearchPort searchPort,
             PersonalMemoryRepository personalMemoryRepository,
             MemoryRelevanceRankingPolicy rankingPolicy) {
+        this(
+                searchPort,
+                personalMemoryRepository,
+                rankingPolicy,
+                MemoryDeduplicationPolicy.preservingCandidates(),
+                MemoryDiversityPolicy.preservingCandidates());
+    }
+
+    public FindRelevantMemoriesService(
+            AnswerMemorySearchPort searchPort,
+            PersonalMemoryRepository personalMemoryRepository,
+            MemoryRelevanceRankingPolicy rankingPolicy,
+            MemoryDeduplicationPolicy deduplicationPolicy,
+            MemoryDiversityPolicy diversityPolicy) {
         this.rankingPolicy = Objects.requireNonNull(rankingPolicy, "rankingPolicy must not be null");
+        this.deduplicationPolicy =
+                Objects.requireNonNull(deduplicationPolicy, "deduplicationPolicy must not be null");
+        this.diversityPolicy = Objects.requireNonNull(diversityPolicy, "diversityPolicy must not be null");
         this.searchPort = Objects.requireNonNull(searchPort, "searchPort must not be null");
         this.personalMemoryRepository = Objects.requireNonNull(
                 personalMemoryRepository, "personalMemoryRepository must not be null");
@@ -76,7 +100,12 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             memory.flatMap(m -> toRankingCandidate(query, candidate, m)).ifPresent(eligible::add);
         }
 
-        List<MemoryContextItem> items = rankingPolicy.rank(query, List.copyOf(eligible)).stream()
+        List<MemoryRankingCandidate> ranked = List.copyOf(rankingPolicy.rank(query, List.copyOf(eligible)));
+        List<MemoryRankingCandidate> deduplicated =
+                List.copyOf(deduplicationPolicy.deduplicate(query, ranked));
+        List<MemoryRankingCandidate> diversified =
+                List.copyOf(diversityPolicy.diversify(query, deduplicated));
+        List<MemoryContextItem> items = diversified.stream()
                 .map(MemoryRankingCandidate::item)
                 .toList();
 

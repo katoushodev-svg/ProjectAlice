@@ -106,6 +106,53 @@ class MemoryRelevanceRankingFoundationTest {
     }
 
     @Test
+    void rankedCandidatesPassThroughDeduplicationThenDiversityPolicies() {
+        PersonalMemory memory = add("Authoritative.", MemoryCategory.PROJECT, SensitivityLevel.NORMAL);
+        candidates = List.of(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
+        List<String> stages = new ArrayList<>();
+
+        FindRelevantMemoriesResult result = new FindRelevantMemoriesService(
+                        searchPort,
+                        repository,
+                        (q, ranked) -> {
+                            stages.add("ranking");
+                            assertEquals("Authoritative.", ranked.get(0).item().content());
+                            return ranked;
+                        },
+                        (q, ranked) -> {
+                            stages.add("deduplication");
+                            assertEquals("Authoritative.", ranked.get(0).item().content());
+                            return ranked;
+                        },
+                        (q, deduplicated) -> {
+                            stages.add("diversity");
+                            assertEquals("Authoritative.", deduplicated.get(0).item().content());
+                            return deduplicated;
+                        })
+                .execute(query());
+
+        assertEquals(List.of("ranking", "deduplication", "diversity"), stages);
+        assertEquals(List.of(memory.memoryId()), result.items().stream().map(MemoryContextItem::memoryId).toList());
+        assertEquals("Authoritative.", result.items().get(0).content());
+    }
+
+    @Test
+    void defaultDeduplicationAndDiversityDoNotAssumeDuplicateRules() {
+        PersonalMemory memory = add("Authoritative.", MemoryCategory.PROJECT, SensitivityLevel.NORMAL);
+        candidates = List.of(
+                new MemorySearchCandidate(memory.memoryId(), 1, Set.of(MemorySearchSignal.KEYWORD_MATCH)),
+                new MemorySearchCandidate(memory.memoryId(), 1, Set.of(MemorySearchSignal.ENTITY_MATCH)));
+
+        FindRelevantMemoriesResult result =
+                new FindRelevantMemoriesService(searchPort, repository).execute(query());
+
+        assertEquals(2, result.items().size());
+        assertEquals(List.of(memory.memoryId(), memory.memoryId()),
+                result.items().stream().map(MemoryContextItem::memoryId).toList());
+        assertTrue(result.items().stream().allMatch(item -> item.content().equals("Authoritative.")));
+    }
+
+    @Test
     void rankingModelsCarryNoProviderScoreOrWeight() {
         for (Class<?> type : List.of(MemoryRankingCandidate.class, MemoryContextItem.class)) {
             for (RecordComponent c : type.getRecordComponents()) {
