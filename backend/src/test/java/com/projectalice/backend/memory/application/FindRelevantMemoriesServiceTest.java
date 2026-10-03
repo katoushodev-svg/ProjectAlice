@@ -115,13 +115,33 @@ class FindRelevantMemoriesServiceTest {
     }
 
     @Test
-    void resolvedMemoryIsNotTreatedAsHistoricalContext() {
+    void resolvedMemoryIsNotEligibleForCurrentAnswer() {
         PersonalMemory memory = repository.add(memory("Was using Ruby.", MemoryCategory.ENGINEERING));
         memory.update(memory.content(), memory.category(), memory.sensitivityLevel(),
                 MemoryState.RESOLVED, NOW.plusMinutes(1));
         searchPort.candidates = List.of(new MemorySearchCandidate(memory.memoryId(), 2, Set.of()));
 
         assertTrue(service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x")).items().isEmpty());
+    }
+
+    @Test
+    void resolvedMemoryIsEligibleForHistoricalAnswer() {
+        PersonalMemory memory = repository.add(memory("Was using Ruby.", MemoryCategory.ENGINEERING));
+        memory.update(memory.content(), memory.category(), memory.sensitivityLevel(),
+                MemoryState.RESOLVED, NOW.plusMinutes(1));
+        searchPort.candidates = List.of(new MemorySearchCandidate(memory.memoryId(), 2, Set.of()));
+
+        MemoryContextItem item = service.execute(query(MemoryRetrievalPurpose.ANSWER_HISTORICAL, "x"))
+                .items().get(0);
+
+        assertEquals(MemoryTemporalRole.HISTORICAL, item.temporalRole());
+        assertEquals(MemoryState.RESOLVED, item.state());
+    }
+
+    @Test
+    void activeMemoryIsNotConvertedToHistoricalContext() {
+        PersonalMemory memory = repository.add(memory("Uses Java.", MemoryCategory.ENGINEERING));
+        searchPort.candidates = List.of(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
 
         assertTrue(service.execute(query(MemoryRetrievalPurpose.ANSWER_HISTORICAL, "x")).items().isEmpty());
     }

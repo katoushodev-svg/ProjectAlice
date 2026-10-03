@@ -2,7 +2,6 @@ package com.projectalice.backend.memory.application;
 
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.port.out.PersonalMemoryRepository;
-import com.projectalice.backend.memory.domain.MemoryState;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -12,13 +11,14 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Candidate generation followed by authoritative hydration. Ranking, deduplication,
- * eligibility beyond state/purpose and budget enforcement are deferred.
+ * Candidate generation followed by authoritative hydration and eligibility filtering.
+ * Ranking, deduplication and budget enforcement are deferred.
  */
 public final class FindRelevantMemoriesService implements FindRelevantMemoriesUseCase {
 
     private final AnswerMemorySearchPort searchPort;
     private final PersonalMemoryRepository personalMemoryRepository;
+    private final MemoryEligibilityPolicy eligibilityPolicy = new MemoryEligibilityPolicy();
 
     public FindRelevantMemoriesService(
             AnswerMemorySearchPort searchPort, PersonalMemoryRepository personalMemoryRepository) {
@@ -64,7 +64,7 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 partial = true;
                 continue;
             }
-            memory.flatMap(m -> toContextItem(purpose, candidate, m)).ifPresent(items::add);
+            memory.flatMap(m -> toContextItem(query, candidate, m)).ifPresent(items::add);
         }
 
         return new FindRelevantMemoriesResult(
@@ -72,14 +72,11 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 items);
     }
 
-    private static Optional<MemoryContextItem> toContextItem(
-            MemoryRetrievalPurpose purpose, MemorySearchCandidate candidate, PersonalMemory memory) {
-
-        MemoryTemporalRole role;
-        if (purpose == MemoryRetrievalPurpose.ANSWER_CURRENT && memory.state() == MemoryState.ACTIVE) {
-            role = MemoryTemporalRole.CURRENT;
-        } else {
-            // Historical retrieval needs revision data and is deferred to a later step.
+    private Optional<MemoryContextItem> toContextItem(
+            MemoryRetrievalQuery query, MemorySearchCandidate candidate, PersonalMemory memory) {
+        Optional<MemoryTemporalRole> role = eligibilityPolicy.evaluate(
+                query.purpose(), query, candidate, memory);
+        if (role.isEmpty()) {
             return Optional.empty();
         }
 
@@ -95,7 +92,7 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 memory.category(),
                 memory.state(),
                 memory.sensitivityLevel(),
-                role,
+                role.orElseThrow(),
                 reasons));
     }
 }
