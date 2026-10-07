@@ -22,6 +22,8 @@
         <aws.java.sdk.version>2.55.9</aws.java.sdk.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <openai.java.sdk.version>4.51.0</openai.java.sdk.version>
+        <wiremock.version>3.13.2</wiremock.version>
+        <excludedGroups>external-openai</excludedGroups>
     </properties>
 
     <dependencies>
@@ -54,6 +56,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>${wiremock.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -90,4 +98,13 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>openai-integration-test</id>
+            <properties>
+                <excludedGroups>none</excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
 </project>
