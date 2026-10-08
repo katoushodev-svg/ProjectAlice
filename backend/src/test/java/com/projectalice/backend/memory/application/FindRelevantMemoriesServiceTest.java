@@ -175,6 +175,88 @@ class FindRelevantMemoriesServiceTest {
     }
 
     @Test
+    void limitsCandidatePoolBeforeHydration() {
+        List<MemorySearchCandidate> candidates = new ArrayList<>();
+        for (int i = 0; i < 41; i++) {
+            PersonalMemory memory = repository.add(memory("Memory " + i, MemoryCategory.PROJECT));
+            candidates.add(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
+        }
+        searchPort.candidates = candidates;
+
+        service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
+
+        assertEquals(MemoryContextBudget.DEFAULT_MAX_CANDIDATE_ITEMS, repository.requestedIds.size());
+        assertEquals(candidates.subList(0, MemoryContextBudget.DEFAULT_MAX_CANDIDATE_ITEMS).stream()
+                        .map(MemorySearchCandidate::memoryId).toList(),
+                repository.requestedIds);
+    }
+
+    @Test
+    void limitsFinalItemsWithoutTruncatingSelectedMemoryContent() {
+        List<MemorySearchCandidate> candidates = new ArrayList<>();
+        List<String> content = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            String value = "Complete memory content " + i;
+            content.add(value);
+            PersonalMemory memory = repository.add(memory(value, MemoryCategory.PROJECT));
+            candidates.add(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
+        }
+        searchPort.candidates = candidates;
+
+        List<MemoryContextItem> selected = service.execute(
+                        query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"))
+                .items();
+
+        assertEquals(MemoryContextBudget.DEFAULT_MAX_FINAL_ITEMS, selected.size());
+        assertEquals(content.subList(0, MemoryContextBudget.DEFAULT_MAX_FINAL_ITEMS),
+                selected.stream().map(MemoryContextItem::content).toList());
+    }
+
+    @Test
+    void skipsItemsThatExceedRemainingUtf8BudgetAndContinuesWithoutTruncation() {
+        PersonalMemory tooLarge = repository.add(memory("🌸🌸", MemoryCategory.PROJECT));
+        PersonalMemory firstFit = repository.add(memory("é", MemoryCategory.PROJECT));
+        PersonalMemory secondFit = repository.add(memory("ab", MemoryCategory.PROJECT));
+        searchPort.candidates = List.of(
+                new MemorySearchCandidate(tooLarge.memoryId(), 1, Set.of()),
+                new MemorySearchCandidate(firstFit.memoryId(), 1, Set.of()),
+                new MemorySearchCandidate(secondFit.memoryId(), 1, Set.of()));
+        MemoryContextBudget budget = new MemoryContextBudget(40, 8, 1500, 4);
+
+        List<MemoryContextItem> selected = service.execute(
+                        query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x", budget))
+                .items();
+
+        assertEquals(List.of("é", "ab"), selected.stream().map(MemoryContextItem::content).toList());
+    }
+
+    @Test
+    void appliesItemAndUtf8LimitsTogetherAfterStep44Order() {
+        List<MemorySearchCandidate> candidates = new ArrayList<>();
+        List<String> originalOrder = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            String value = String.valueOf((char) ('a' + i));
+            originalOrder.add(value);
+            PersonalMemory memory = repository.add(memory(value, MemoryCategory.PROJECT));
+            candidates.add(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
+        }
+        searchPort.candidates = candidates;
+        MemoryContextBudget budget = new MemoryContextBudget(4, 3, 1500, 3);
+
+        FindRelevantMemoriesResult result = new FindRelevantMemoriesService(
+                        searchPort,
+                        repository,
+                        (q, ranked) -> ranked,
+                        (q, ranked) -> ranked,
+                        (q, diversified) -> List.of(
+                                diversified.get(2), diversified.get(0), diversified.get(1), diversified.get(3)))
+                .execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x", budget));
+
+        assertEquals(List.of(originalOrder.get(2), originalOrder.get(0), originalOrder.get(1)),
+                result.items().stream().map(MemoryContextItem::content).toList());
+    }
+
+    @Test
     void applicationModelsDoNotExposeProviderOrStorageDetails() {
         Set<String> names = new HashSet<>();
         for (Class<?> type : List.of(MemoryContextItem.class, MemorySearchCandidate.class,
@@ -198,8 +280,13 @@ class FindRelevantMemoriesServiceTest {
     }
 
     private static MemoryRetrievalQuery query(MemoryRetrievalPurpose purpose, String content) {
+        return query(purpose, content, MemoryContextBudget.baseline());
+    }
+
+    private static MemoryRetrievalQuery query(
+            MemoryRetrievalPurpose purpose, String content, MemoryContextBudget budget) {
         return new MemoryRetrievalQuery(purpose, content, null, null, null, null,
-                MemoryTemporalIntent.UNSPECIFIED, MemoryContextBudget.baseline(), "req-1");
+                MemoryTemporalIntent.UNSPECIFIED, budget, "req-1");
     }
 
     private static PersonalMemory memory(String content, MemoryCategory category) {

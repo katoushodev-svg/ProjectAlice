@@ -1,6 +1,6 @@
 package com.projectalice.backend.memory.application;
 
-/** Carries limits across the application boundary; enforcement is not implemented yet. */
+/** Carries the limits used by answer-time memory selection. */
 public record MemoryContextBudget(
         int maxCandidateItems,
         int maxFinalItems,

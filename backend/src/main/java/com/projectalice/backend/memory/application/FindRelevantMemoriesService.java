@@ -3,6 +3,7 @@ package com.projectalice.backend.memory.application;
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.port.out.PersonalMemoryRepository;
 import com.projectalice.backend.memory.domain.PersonalMemory;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -80,9 +81,11 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             return FindRelevantMemoriesResult.unavailable();
         }
 
+        int candidateLimit = Math.min(candidates.size(), query.contextBudget().maxCandidateItems());
         List<MemoryRankingCandidate> eligible = new ArrayList<>();
         boolean partial = false;
-        for (MemorySearchCandidate candidate : candidates) {
+        for (int i = 0; i < candidateLimit; i++) {
+            MemorySearchCandidate candidate = candidates.get(i);
             if (candidate == null) {
                 continue;
             }
@@ -105,13 +108,36 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 List.copyOf(deduplicationPolicy.deduplicate(query, ranked));
         List<MemoryRankingCandidate> diversified =
                 List.copyOf(diversityPolicy.diversify(query, deduplicated));
-        List<MemoryContextItem> items = diversified.stream()
-                .map(MemoryRankingCandidate::item)
-                .toList();
+        List<MemoryContextItem> items = applyContextBudget(diversified, query.contextBudget());
 
         return new FindRelevantMemoriesResult(
                 partial ? FindRelevantMemoriesResult.Status.PARTIAL : FindRelevantMemoriesResult.Status.COMPLETE,
                 items);
+    }
+
+    /**
+     * Applies the available item and UTF-8 limits after Step 4-4. Token estimation is not
+     * implemented yet, so this is the explicit §14.16 fallback path.
+     */
+    private static List<MemoryContextItem> applyContextBudget(
+            List<MemoryRankingCandidate> diversified, MemoryContextBudget budget) {
+        List<MemoryContextItem> selected = new ArrayList<>();
+        long usedUtf8Bytes = 0;
+        for (MemoryRankingCandidate candidate : diversified) {
+            if (selected.size() >= budget.maxFinalItems()) {
+                break;
+            }
+
+            MemoryContextItem item = candidate.item();
+            long itemUtf8Bytes = item.content().getBytes(StandardCharsets.UTF_8).length;
+            if (itemUtf8Bytes > budget.maxUtf8Bytes() - usedUtf8Bytes) {
+                continue;
+            }
+
+            selected.add(item);
+            usedUtf8Bytes += itemUtf8Bytes;
+        }
+        return List.copyOf(selected);
     }
 
     private Optional<MemoryRankingCandidate> toRankingCandidate(
