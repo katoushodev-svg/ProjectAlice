@@ -66,15 +66,45 @@ public final class ConversationContextBuilder {
         }
         messages.add(toAiMessage(currentUserMessage));
 
-        TextGenerationRequest request =
-                new TextGenerationRequest(AiWorkload.CONVERSATION_REPLY, instructions, messages);
-
-        long inputTokens = inputTokenCounter.count(request, executionContext);
-        if (inputTokens > policy.maxInputTokens()) {
-            // Over-budget handling is not confirmed in the design yet.
-            throw new UnsupportedOperationException("Input token budget exceeded; handling is not yet defined");
+        TextGenerationRequest request = request(instructions, messages);
+        if (inputTokenCounter.count(request, executionContext) <= policy.maxInputTokens()) {
+            return request;
         }
-        return request;
+
+        // History may only be reduced at USER boundaries, keeping the largest fitting recent suffix.
+        List<Integer> userBoundaries = new ArrayList<>();
+        for (int index = 0; index < history.size(); index++) {
+            if (history.get(index).role() == ConversationMessageRole.USER) {
+                userBoundaries.add(index);
+            }
+        }
+
+        int low = 0;
+        int high = userBoundaries.size() - 1;
+        TextGenerationRequest best = request(instructions, List.of(toAiMessage(currentUserMessage)));
+        long bestTokens = inputTokenCounter.count(best, executionContext);
+        if (bestTokens > policy.maxInputTokens()) {
+            throw new UnsupportedOperationException("Instructions and current user message exceed input token budget");
+        }
+
+        while (low <= high) {
+            int middle = low + (high - low) / 2;
+            int start = userBoundaries.get(middle);
+            List<AiMessage> selected = new ArrayList<>(messages.subList(start, messages.size()));
+            TextGenerationRequest candidate = request(instructions, selected);
+            long tokens = inputTokenCounter.count(candidate, executionContext);
+            if (tokens <= policy.maxInputTokens()) {
+                best = candidate;
+                high = middle - 1;
+            } else {
+                low = middle + 1;
+            }
+        }
+        return best;
+    }
+
+    private static TextGenerationRequest request(String instructions, List<AiMessage> messages) {
+        return new TextGenerationRequest(AiWorkload.CONVERSATION_REPLY, instructions, messages);
     }
 
     private static AiMessage toAiMessage(ConversationMessage message) {

@@ -32,8 +32,10 @@ class OpenAiSmokeIT {
         var executor = configuration.openAiCallExecutor(apiKey);
         var provider = configuration.openAiTextGenerationProvider(executor, settings);
 
+        var repository = org.mockito.Mockito.mock(com.projectalice.backend.conversation.application.port.ConversationRepository.class);
+        org.mockito.Mockito.when(repository.findLatestMessages(org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of());
         var builder = new ConversationContextBuilder(
-                limit -> List.of(), (request, ctx) -> 10,
+                repository, (request, ctx) -> 10,
                 new ConversationAiPolicy(64_000, 100, Duration.ofSeconds(60)));
         var current = new ConversationMessage(
                 "m1", 1, ConversationMessageRole.USER, "Say hello in one short sentence.", OffsetDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS));

@@ -48,11 +48,13 @@ class SendMessageUseCaseTest {
         List<Integer> historyLimits = new ArrayList<>();
         List<ConversationMessage> history = List.of(
                 new ConversationMessage("m1", 1, ConversationMessageRole.ASSISTANT, "a1", NOW));
+        var repository = org.mockito.Mockito.mock(com.projectalice.backend.conversation.application.port.ConversationRepository.class);
+        org.mockito.Mockito.when(repository.findLatestMessages(org.mockito.ArgumentMatchers.anyInt())).thenAnswer(invocation -> {
+            historyLimits.add(invocation.getArgument(0));
+            return history;
+        });
         ConversationContextBuilder builder = new ConversationContextBuilder(
-                limit -> {
-                    historyLimits.add(limit);
-                    return history;
-                },
+                repository,
                 (request, ctx) -> 10,
                 new ConversationAiPolicy(64_000, 100, Duration.ofSeconds(60)));
         FakeProvider provider = new FakeProvider();

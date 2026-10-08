@@ -20,6 +20,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.ToLongFunction;
 import org.junit.jupiter.api.Test;
 
 class ConversationContextBuilderTest {
@@ -30,16 +31,30 @@ class ConversationContextBuilderTest {
 
     private final List<TextGenerationRequest> countedRequests = new ArrayList<>();
     private long tokenCount = 10;
+    private ToLongFunction<TextGenerationRequest> tokenCounter = request -> tokenCount;
 
     private ConversationContextBuilder builderWith(List<ConversationMessage> candidates) {
-        ConversationRepository repository = limit -> candidates;
+        return builderWith(candidates, 64_000);
+    }
+
+    private ConversationContextBuilder builderWith(List<ConversationMessage> candidates, long maxInputTokens) {
+        ConversationRepository repository = new ConversationRepository() {
+            @Override public List<ConversationMessage> findLatestMessages(int limit) { return candidates; }
+            @Override public List<ConversationMessage> findMessagesBefore(long sequence, int limit) { throw new UnsupportedOperationException(); }
+            @Override public java.util.Optional<ConversationState> findConversation() { throw new UnsupportedOperationException(); }
+            @Override public java.util.Optional<IdempotencyState> findIdempotency(String key) { throw new UnsupportedOperationException(); }
+            @Override public void start(SendStart start) { throw new UnsupportedOperationException(); }
+            @Override public void complete(String key, ConversationMessage assistant) { throw new UnsupportedOperationException(); }
+            @Override public void fail(String key, String code, java.time.OffsetDateTime at, long expiry) { throw new UnsupportedOperationException(); }
+            @Override public void recoverExpired(String key, java.time.OffsetDateTime at, long expiry) { throw new UnsupportedOperationException(); }
+        };
         return new ConversationContextBuilder(
                 repository,
                 (request, ctx) -> {
                     countedRequests.add(request);
-                    return tokenCount;
+                    return tokenCounter.applyAsLong(request);
                 },
-                new ConversationAiPolicy(64_000, 100, Duration.ofSeconds(60)));
+                new ConversationAiPolicy(maxInputTokens, 100, Duration.ofSeconds(60)));
     }
 
     private static ConversationMessage msg(String id, long seq, ConversationMessageRole role, String content) {
@@ -120,5 +135,33 @@ class ConversationContextBuilderTest {
 
         assertThatThrownBy(() -> builderWith(List.of()).build("inst", current, EXECUTION_CONTEXT))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void removesOldestHistoryUntilBudgetFitsAtUserBoundary() {
+        List<ConversationMessage> candidates = List.of(
+                msg("m4", 4, ConversationMessageRole.ASSISTANT, "a2"),
+                msg("m3", 3, ConversationMessageRole.USER, "u2"),
+                msg("m2", 2, ConversationMessageRole.ASSISTANT, "a1"),
+                msg("m1", 1, ConversationMessageRole.USER, "u1"));
+        ConversationMessage current = msg("m5", 5, ConversationMessageRole.USER, "now");
+        tokenCounter = request -> request.messages().size() <= 3 ? request.messages().size() : 10;
+
+        TextGenerationRequest request = builderWith(candidates, 3).build("inst", current, EXECUTION_CONTEXT);
+
+        assertThat(request.messages()).containsExactly(
+                new AiMessage(AiMessageRole.USER, "u2"),
+                new AiMessage(AiMessageRole.ASSISTANT, "a2"),
+                new AiMessage(AiMessageRole.USER, "now"));
+        assertThat(countedRequests).hasSizeLessThanOrEqualTo(4);
+    }
+
+    @Test
+    void rejectsWhenInstructionsAndCurrentMessageExceedBudget() {
+        ConversationMessage current = msg("m1", 1, ConversationMessageRole.USER, "now");
+        tokenCounter = request -> request.messages().size() == 1 ? 11 : 12;
+
+        assertThatThrownBy(() -> builderWith(List.of(), 10).build("inst", current, EXECUTION_CONTEXT))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }

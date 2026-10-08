@@ -73,8 +73,10 @@ class OpenAiSendMessageWireMockTest {
 
         OffsetDateTime now = OffsetDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         var history = List.of(new ConversationMessage("m1", 1, ConversationMessageRole.ASSISTANT, "earlier", now));
+        var repository = org.mockito.Mockito.mock(com.projectalice.backend.conversation.application.port.ConversationRepository.class);
+        org.mockito.Mockito.when(repository.findLatestMessages(org.mockito.ArgumentMatchers.anyInt())).thenReturn(history);
         var builder = new ConversationContextBuilder(
-                limit -> history, (request, ctx) -> 10,
+                repository, (request, ctx) -> 10,
                 new ConversationAiPolicy(64_000, 100, Duration.ofSeconds(60)));
         var current = new ConversationMessage("m2", 2, ConversationMessageRole.USER, "hi", now);
         var context = new AiExecutionContext(Instant.now().plusSeconds(30), new NeverCancelled());

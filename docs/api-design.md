@@ -669,18 +669,29 @@ BackendがRequestを受理し、Alice Response生成処理を開始したこと�
 
 ```text
 event: stream.started
-data: {"requestId":"9af98b1e-5aa8-4d67-bf53-f657ddfe3dcb"}
+data: {"requestId":"9af98b1e-5aa8-4d67-bf53-f657ddfe3dcb","userMessage":{"id":"4d5e6f70-8192-4abc-8def-0123456789ab","role":"user","content":"こんにちは","createdAt":"2026-08-20T23:00:00.000+09:00"}}
 ```
 
 ```json
 {
-  "requestId": "9af98b1e-5aa8-4d67-bf53-f657ddfe3dcb"
+  "requestId": "9af98b1e-5aa8-4d67-bf53-f657ddfe3dcb",
+  "userMessage": {
+    "id": "4d5e6f70-8192-4abc-8def-0123456789ab",
+    "role": "user",
+    "content": "こんにちは",
+    "createdAt": "2026-08-20T23:00:00.000+09:00"
+  }
 }
 ```
 
-`stream.started`はMessageのPersistence完了を意味しない。
+| Field | Type | Required | Description |
+|---|---|---:|---|
+| `requestId` | string | Yes | 現在のHTTP Requestの識別子 |
+| `userMessage` | Message | Yes | Start Transactionで保存済みのCanonical User Message |
 
-Message IDをいつ確定するかは、Persistence Strategyと合わせて`database-design.md`で決定する。
+`stream.started`はUser MessageのPersistence完了とIdempotency Stateの`PROCESSING`開始を意味する。Assistant Messageの生成またはPersistence完了は意味しない。
+
+FlutterはPending User Messageを`userMessage`へ置換し、Contentの完全一致を確認する。Completed / Failed Replayでも保存済みCanonical User Messageを含める。Pre-stream Failureでは`stream.started`を送らず、User Messageは保存されない。
 
 ### 16.2 `assistant.delta`
 
