@@ -1885,6 +1885,23 @@ ModelのContext Window、MemoryContent上限およびEval結果によりBaseline
 
 Memory本文を途中で切って意味を変えない。単一Memoryが残りBudgetを超える場合は、そのMemoryを省略するか、後続設計で承認された安全な要約方式を利用する。
 
+#### Token Estimation Contract
+
+Estimated Memory Tokensの適用には、`memory.application`が所有するProvider非依存の`TokenEstimator` Application Portを利用する。これはMemory ContextのBudget適用に必要な契約であり、AI Provider SDKや`ai` Featureの`InputTokenCounter`をMemory Featureから直接利用するものではない。
+
+Estimatorへの入力は、候補検索結果や`PersonalMemory` Aggregate全体ではなく、実際にMemory Contextへ含めるProvider非依存のPayloadを、最終Contextへ追加する順序で表現したものとする。推定対象に含めるのはContextへ送る内容だけとし、検索Score、Repository情報、Revision全文などContextへ含めない内部情報を推定対象へ混入させない。Context Payloadの具体的なシリアライズ形式やToken Estimation Algorithmは本契約では確定しない。
+
+Estimatorの結果は、次の状態を区別できなければならない。
+
+- **Estimated**：推定に成功し、非負の推定Token数を返す。
+- **Unavailable**：実行時に推定を完了できなかった。推定値が得られたものとして扱わない。
+
+EstimatorがApplication構成に登録されていない状態は`Unavailable`ではない。必須Dependencyの欠落というConfiguration Errorとして起動時に検出し、通常の推定失敗Fallbackで隠さない。
+
+推定に成功した場合は、Final Memory Items、Estimated Memory Tokens、Memory UTF-8 Bytesの各上限を同時に適用する。実行時の推定失敗時はSection 14.16のFallbackを適用する。この場合、件数とUTF-8 Byte上限は維持するが、推定値がないため1,500 tokens以内であることは保証しない。内部Result / Traceでも、推定成功とFallbackによる推定不能を区別する。
+
+Token Estimatorの具体的なAlgorithm、Library、推定精度およびPayloadの具体的なEncodingはDeferredとする。これらを確定するまでは、推定成功を装う固定値や仮のEstimatorを導入しない。
+
 ### 14.10 MemoryContextItem
 
 Conversation / AI Context Builderへ返すApplication Modelを、`PersonalMemory` AggregateおよびSearch Resultから分離する。
@@ -2013,7 +2030,8 @@ AI Provider呼出し直前に、少なくともMemory ID、VersionおよびReset
 | 一部Search Source失敗 | 検証済み候補だけを利用し、PartialとしてTrace |
 | Authoritative Hydration失敗 | 該当候補を使用しない |
 | Ranking失敗 | 未順位候補をすべて渡さず、Memoryなしまたは安全なDeterministic順位へFallback |
-| Token Estimate失敗 | Item / UTF-8 Byte上限を使用して無制限追加を防ぐ |
+| Token Estimate実行時失敗 | Final Memory Items最大8件 / UTF-8 Byte最大12 KiBを適用して無制限追加を防ぐ。Token推定値がないため1,500 tokens以内は保証せず、内部Result / Traceで推定不能Fallbackを区別する |
+| Token Estimator未登録 | Application構成不備として起動時に検出する。実行時推定失敗Fallbackへ変換しない |
 | Final Validation失敗 | 該当MemoryをContextから除外 |
 
 Memory検索失敗をConversation全体のUnexpected Errorへ変換しない。Aliceは取得できなかったMemoryを知っているように振る舞わず、必要ならMemory利用がUnavailableだったことを説明できる。
@@ -2043,12 +2061,12 @@ Vector Store追加はPersistence変更ではなくSearch Capability追加とし�
 
 ### 14.18 Initial Baseline and Deferred Details
 
-本Sectionで確定するのはBoundary、Flow、安全Ruleおよび初期Context上限である。次は後続設計で確定する。
+本Sectionで確定するのはBoundary、Flow、安全Rule、初期Context上限およびToken EstimatorのApplication契約である。次は後続設計で確定する。
 
 - Phase 2初期Search AdapterとAccess Pattern
 - Keyword NormalizationとLanguage処理
 - Ranking Weight、Minimum Relevance ThresholdおよびTie-breaker
-- Token Estimator実装
+- Token Estimatorの具体的なAlgorithm、Library、推定精度およびPayload Encoding
 - Search ProjectionのDynamoDB / Search Schema
 - Semantic Search / Embedding Model / Vector Store採否
 - Index更新Consistency、RetryおよびRepair Queue
@@ -2192,6 +2210,9 @@ API、PersistenceおよびTest Caseへの詳細Traceabilityは後続設計で追
 | MD-083 | Provider呼出し直前にMemory ID、VersionおよびReset Generationを最終検証する | Accepted |
 | MD-084 | Memory検索失敗時はMemoryなしでConversationを継続し、取得できたように振る舞わない | Accepted |
 | MD-085 | Semantic Search / Vector Store採否を実Memoryに基づくEval、Latency、CostおよびPrivacyで判断する | Accepted |
+| MD-134 | Token Estimatorを`memory.application`所有のProvider非依存Application Portとして定義し、実際にMemory Contextへ含めるPayloadを推定対象とする | Accepted |
+| MD-135 | Token Estimatorの未登録はConfiguration Errorとして起動時に検出し、実行時推定失敗とは区別する | Accepted |
+| MD-136 | Token推定実行時失敗時は最大8件・UTF-8最大12 KiBのFallbackを適用し、1,500 tokens以内は保証せず、推定不能状態を内部で区別する | Accepted |
 
 これらは既存Architectureを変更せず、Approved Phase 2 Requirementsを具体化する。Architecture変更が必要になった場合は、勝手に本表を変更せずADR要否を判断する。
 

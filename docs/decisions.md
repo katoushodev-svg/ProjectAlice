@@ -988,3 +988,76 @@ Result
 Project AliceのAI利用は、独立した`ai` Featureが所有するCapability-specific Portを介して行う。
 
 Phase 1 Source CodeではConversation Text Generationに必要な最小Capabilityだけを実装し、Phase 2〜4の設計を理由として未使用機能を先行実装しない。
+
+⸻
+
+ADR-015 Memory Token EstimatorのApplication契約と実行時Fallback
+
+Status
+
+Accepted
+
+⸻
+
+Context
+
+Phase 2のMemory Retrievalでは、最終Memory件数、推定Token数、UTF-8 Byte数の上限を同時に適用する。初期上限は、最終Memory最大8件、推定1,500 tokens、Memory本文のUTF-8最大12 KiBである。
+
+`memory-design.md` §14.18では、Token Estimatorの具体的な実装をDeferredとしている。一方、Application Boundaryとしては、実行時の推定失敗とApplication構成不備を区別し、推定を利用できない場合の安全な動作を定義する必要がある。この区別がないと、必須Dependencyの登録漏れをFallbackで隠したり、推定していないPayloadがToken Budgetを満たすと誤って扱ったりする可能性がある。
+
+Decision
+
+1. Memory Featureは、`memory.application`にProvider非依存の`TokenEstimator` Application Portを所有する。
+2. Estimatorへの入力は、推定対象となる実際のProvider非依存Memory Context Payloadを、最終的にContextへ追加する順序で表現する。`PersonalMemory` Aggregate全体、検索Metadata、またはMemory Contextとして送信しない情報を推定対象にしない。
+3. Resultは、推定成功（`Estimated`。非負の推定Token数を含む）と推定不能（`Unavailable`）を区別する。推定不能を成功扱いしたり、推定値を捏造したりしない。
+4. `TokenEstimator`がApplication構成に登録されていない場合はConfiguration Errorとし、起動時に検出する。通常の実行時推定失敗として扱わない。
+5. 登録済みEstimatorが実行時に推定に失敗した場合、Memory Retrievalは§14.16のFallbackを適用する。最終Memory最大8件、Memory本文のUTF-8最大12 KiBを守り、Memory本文を途中で切断しない。Token推定値が存在しないため、このFallbackでは1,500 tokens以内を保証しない。内部Result / Traceでは、推定成功と推定不能Fallbackを区別する。
+6. EstimatorのAlgorithm、Library、推定精度の目標、およびPayloadの具体的なEncodingは引き続きDeferredとする。本ADRが確定するのはApplication契約と失敗時の区別のみであり、未確定事項を埋める仮Estimatorや本番実装を許可するものではない。
+
+Alternatives Considered
+
+Estimator未登録を実行時推定失敗として扱う
+
+採用しない。Application構成の不備を隠し、一時的な推定失敗と区別できなくなるため。
+
+推定失敗時にも1,500 tokens以内を保証したものとして扱う
+
+採用しない。推定値が存在せず、その保証を裏付けられないため。Fallbackでは件数とUTF-8 Byteの上限を維持するが、Token上限は保証しない。
+
+この段階で推定Algorithmを確定し実装する
+
+採用しない。Algorithmと具体的なEncodingは承認済みMemory設計でDeferredとなっているため。未確定事項を暗黙に決めず、Application契約のみを先に確定する。
+
+Consequences
+
+Positive
+
+- Memory ApplicationはAI Provider SDKおよび`ai` FeatureのProvider固有Adapterから独立する。
+- Configuration ErrorがFallback動作によって隠されない。
+- 実行時Fallbackの制約が明確になり、根拠のないToken Budget保証を行わない。
+- 承認済みのOwnershipと失敗時の意味を維持したまま、後続作業でEstimatorを実装できる。
+
+Negative
+
+- 実行時推定失敗時は、Memory Contextが1,500 tokens以内に収まることを保証できない。
+- Estimatorの実装方式と推定精度は、別途設計・検証する必要がある。
+
+Implementation Rules
+
+- Memory FeatureへOpenAI SDK依存を導入しない。`ai.application`の`InputTokenCounter`をMemory Featureから直接再利用しない。
+- 実際のMemory Context Payloadに含まれないFieldを推定対象にしない。
+- Budget適合のためにMemory本文を途中で切断しない。
+- 推定不能を0 tokensまたは推定成功として表現しない。
+- 必須Estimatorの登録を起動時に検証する。
+- Algorithm、Library、推定精度、Payloadの具体的なEncodingは、別途設計されるまでDeferredのままとする。
+- 推定成功、実行時推定失敗とFallback、Estimator未登録による構成エラー、件数・UTF-8上限の同時適用、およびFallback時に1,500 tokensを保証しないことをテストする。
+
+Related Documents
+
+- `memory-design.md` §14.9、§14.16、§14.18
+- `ai-design.md`
+- `test-design.md`
+
+Result
+
+Memory Token EstimatorのApplication契約と実行時Fallbackの意味をAcceptedとする。EstimatorのAlgorithmと実装はDeferredのままである。本ADR単独ではSource CodeやDependency Injection設定を変更しない。
