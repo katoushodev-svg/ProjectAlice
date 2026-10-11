@@ -6,9 +6,11 @@ import com.openai.models.responses.EasyInputMessage;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.inputtokens.InputTokenCountParams;
+import com.projectalice.backend.ai.application.model.AiContextBlock;
 import com.projectalice.backend.ai.application.model.AiMessage;
 import com.projectalice.backend.ai.application.model.AiMessageRole;
 import com.projectalice.backend.ai.application.model.TextGenerationRequest;
+import java.util.ArrayList;
 import java.util.List;
 
 final class OpenAiRequestMapper {
@@ -44,18 +46,32 @@ final class OpenAiRequestMapper {
     }
 
     private static List<ResponseInputItem> toInputItems(TextGenerationRequest request) {
-        return request.messages().stream()
-                .map(OpenAiRequestMapper::toInputItem)
-                .toList();
+        List<ResponseInputItem> items = new ArrayList<>(
+                request.contextBlocks().size() + request.messages().size());
+        for (AiContextBlock block : request.contextBlocks()) {
+            items.add(toInputItem(block.content()));
+        }
+        for (AiMessage message : request.messages()) {
+            items.add(toInputItem(message));
+        }
+        return List.copyOf(items);
     }
 
     private static ResponseInputItem toInputItem(AiMessage message) {
         EasyInputMessage.Role role = message.role() == AiMessageRole.USER
                 ? EasyInputMessage.Role.USER
                 : EasyInputMessage.Role.ASSISTANT;
+        return toInputItem(role, message.content());
+    }
+
+    private static ResponseInputItem toInputItem(String contextContent) {
+        return toInputItem(EasyInputMessage.Role.USER, contextContent);
+    }
+
+    private static ResponseInputItem toInputItem(EasyInputMessage.Role role, String content) {
         return ResponseInputItem.ofEasyInputMessage(EasyInputMessage.builder()
                 .role(role)
-                .content(message.content())
+                .content(content)
                 .build());
     }
 }

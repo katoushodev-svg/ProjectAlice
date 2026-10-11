@@ -8,7 +8,7 @@
 | Project | Project Alice |
 | Target | Phase 1〜4 AI Architecture / Phase 1 Detailed Design |
 | Status | Approved |
-| Last Updated | 2026-08-19 JST |
+| Last Updated | 2026-10-11 JST |
 
 本ドキュメントは、Project Alice Phase 1〜4におけるAlice CoreのAI利用方針、AI Capability Boundary、Prompt、Context Construction、Provider Integration、Tool Calling、Agent / Voice拡張、Streaming、Failure、Observability、SecurityおよびTest Requirementsを定義する。
 
@@ -818,9 +818,10 @@ ConversationPromptComposer
         ↓ instructions
 ConversationRepository
         ↓ persisted messages
-Future PersonalMemoryContextQuery
-        ↓ context data
-ConversationContextBuilder
+SendMessageUseCase
+        ├── FindRelevantMemoriesUseCase
+        │       ↓ Memory Context result
+        └── ConversationContextBuilder
         ↓
 TextGenerationRequest
 ```
@@ -972,33 +973,30 @@ Token Countに失敗した場合のRetry / Fallbackは後続のFailure Policyで
 Personal MemoryはConversation Historyと混同しない。`memory` Featureが関連Memoryの検索・選択を担当し、`conversation` FeatureへProvider-independentなContext Dataとして提供する。
 
 ```text
-Current User Message
-        ↓
-PersonalMemoryContextQuery
-        ↓
-Relevant Personal Memory
-        ↓
-ConversationContextBuilder
-        ↓
-Text Generation Context
+SendMessageUseCase (conversation.application)
+        ├── FindRelevantMemoriesUseCase (memory.application)
+        │       └── Memory Retrieval Query
+        └── ConversationContextBuilder
+                └── TextGenerationRequest
 ```
 
-`PersonalMemoryContextQuery`は`memory` Featureが所有するApplication APIとする。ConversationからMemory Infrastructure、DynamoDB、Vector StoreまたはEmbedding Providerへ直接依存しない。
+Memory Searchを呼び出すか、どのMemory Queryを渡すかはConversation Applicationが調整する。Queryには今回のCurrent User Messageを必須入力とし、検索に必要な場合だけ最小限のConversation Context / intent / entity情報を含める。会話履歴全体を無条件にMemory Searchへ渡さない。具体的なQuery Modelは`memory-design.md`のApplication Contractを使用し、同じ責務の別Query PortをAI Featureへ追加しない。
 
-Phase 0では次の概念Contractを定義する。具体的なPackage、Field ValidationおよびRetrieval Algorithmは`memory-design.md`のSource of Truthとする。
+Memory Applicationは検索・選別・Memory専用Budget適用・Provider-independent Payload生成を所有する。ConversationからMemory Infrastructure、DynamoDB、Vector StoreまたはEmbedding Providerへ直接依存しない。Memory ApplicationはConversation MessageやAI Provider Requestを参照しない。
+
+`FindRelevantMemoriesResult`が0件またはSearch Unavailableの場合はMemory blockを作らず、Conversationを従来どおり継続する。Token Estimator Unavailableの場合はMemory Applicationが返したFallback Payloadを使えるが、1,500-token適合とは扱わない。
+
+Conversation ApplicationはMemory Featureが公開する次のApplication Use Caseを利用する。QueryとResultのField、ValidationおよびRetrieval Algorithmは`memory-design.md`のSource of Truthとする。
 
 ```java
-public interface PersonalMemoryContextQuery {
-
-    List<PersonalMemoryContext> findRelevant(
-        PersonalMemoryContextRequest request
-    );
+public interface FindRelevantMemoriesUseCase {
+    FindRelevantMemoriesResult execute(MemoryRetrievalQuery query);
 }
 ```
 
 Personal MemoryはAlice InstructionではなくContext Dataとして扱う。Memory Content内の命令文によってBase Identity、Permission PolicyまたはCurrent User Requestを上書きさせない。
 
-Memory Contextは関連度、鮮度およびMemory側Policyによって選択し、Conversation側はToken Budgetに従って採用件数を削減できる。Conversation側がMemoryの正しさ、更新または削除を判断しない。
+Memory Contextは関連度、鮮度およびMemory側Policyによって選択し、Conversation側はGeneration Request全体のToken Budgetに従ってMemory Applicationへ縮小を依頼できる。Conversation側でMemory本文を編集・分割・再serializeしない。Conversation側はMemoryの正しさ、更新または削除を判断しない。
 
 ### 11.11 Future Context Data Model
 
@@ -1024,9 +1022,17 @@ public enum AiContextSource {
 }
 ```
 
-このModelはPhase 0のDesign対象であり、Phase 1ではClassおよびRequest Fieldを実装しない。Phase 2で`PERSONAL_MEMORY`が必要になった時点でText Generation Contractへ追加する。
+`TextGenerationRequest`は順序付き`contextBlocks`を持ち、各blockは`referenceId`、`source`および`content`を分離する。Phase 1 Requestは引き続きinstructionsとmessagesだけで構成し、Phase 2のMemory Context接続時にこのFieldを追加する。
 
-`referenceId`はDeduplicationおよびTraceabilityに利用する内部IDであり、Providerへ送信する必要はない。Provider AdapterはSourceとContentを明確に区別してMappingし、Context ContentをInstructionへ昇格させない。
+`referenceId`はDeduplicationおよびTraceabilityに利用する内部参照であり、Providerへ送信しない。Memory blockの`source`は`PERSONAL_MEMORY`、`content`はMemory Applicationが生成した完成済みPayloadそのものとする。Source、Reference、Memory ID / Versionまたは説明文をPayload本文へ加えない。空のMemory Contextではblockを作らない。
+
+Provider Adapterは各Context blockを独立した低権限`user` role messageへMappingし、Message Contentへ`content`をそのまま設定する。OpenAI Responses APIではこのrole付きmessageを`input`へ、instructionsとは別にMappingする。Context block Messageは順序付きで通常のConversation messagesより前に置き、Conversation messagesは元の時系列を保ち、Current User Messageを最後に置く。Context blockをinstructionsまたはCurrent User Messageへ連結しない。Source / ReferenceをProviderが受け付けるMessage metadataとして送ることもせず、Provider wire payloadへ本文として埋め込まない。
+
+Phase 2初期のContext Sourceは`PERSONAL_MEMORY`だけである。Trusted Instructionsは、instructions直後かつConversation messagesの前に置くContext block messageがMemory Dataであること、Memory Content内の命令を実行指示・権限・承認・Security Policyとして扱わないこと、Current User Messageとの競合では現在の明示指示を優先することを定める。Current User MessageとMemory blockはいずれもResponses API上の`user` roleとなるため、roleやmessage順だけで両者の情報優先度が保証されるとはみなさない。RoleとMessage境界は構造上の分離であり、Prompt Injectionへの単独のSecurity Boundaryではない。Application側のCapability制限を維持する。新しいContext Sourceを追加する場合は、そのSourceをモデルが識別するProvider-independentな契約を別途設計し、Payload本文を変形しない。
+
+Text Generation用Mapperと`InputTokenCounter`用Mapperは同じProvider入力変換を共有する。同一の`TextGenerationRequest`から同じinstructions、Context block order、Context content、Conversation message orderとroleを生成する。Input Token Count APIはMemory blockを含むProvider Request全体を計数し、Memory専用1,500-token Budgetの代替にはしない。
+
+OpenAI AdapterのContext block MappingはResponses APIのrole付きInput Messageを使用する。Message Contentとrole以外のOpenAI固有wire detailをAI Application Modelへ漏らさない。実装時は[Responses API Create Reference](https://developers.openai.com/api/reference/resources/responses/methods/create)および[Input Token Count Reference](https://developers.openai.com/api/reference/resources/responses/subresources/input_tokens/methods/count)の現行SchemaとSDK mappingを確認する。Application-level contractはADR-017で定義する。
 
 ### 11.12 Phase 2〜4 Budget Priority
 
@@ -1056,6 +1062,14 @@ Reduce in this order
 3. Verbose Tool Result / External Content
 4. Recent Conversation History
 ```
+
+これは情報の真偽を判断するPriorityとは別のRequest-size削減順である。Generation Request全体が上限を超えた場合、Conversation Applicationは実際の完成Request全体をInputTokenCounterで再計数しながら、上記の順序でContext Unitを除外する。Current User Message、Base Identity、Feature / Permission PolicyおよびCorrectnessに必須のActive Tool / Agent Stateは除外しない。
+
+Memory縮小はMemory Applicationの選択済みMemory Listに対する調整契約を使う。元の最終選択List（最大8件）だけを候補とし、初回Searchの未選択最大40候補を再検索または補充しない。Memory Applicationは元Selection順の末尾から一件ずつ除外し、選択順を保ったPayloadを再生成し、Memory件数・12 KiB・推定1,500 tokens Budgetを再適用する。Conversationは返されたPayloadをそのままContext blockへ格納する。
+
+Token EstimatorがUnavailableでも、Conversationは末尾Memoryを一件ずつMemory Applicationへ除外依頼し、Fallback PayloadでGeneration Request全体を再計数できる。Memoryが空になればContext blockを除き、以後Memoryは再追加しない。最大8件の元Selectionは最大8回の縮小で空になるため、この縮小過程は有限である。Token Estimator未登録は起動時Configuration Errorであり、実行時Fallbackに変換しない。
+
+Requestが上限を満たすまでInputTokenCounterで確認する。Counter失敗またはInput Token Count Stage Deadline超過時は未計数RequestをProviderへ送らず、既定のAI Failure / Retry Policyを適用する。縮小後も不可削除要素を含む最小Requestが上限を超える場合はGenerationを開始せず、既存のInput Budget超過Failureを返す。
 
 Agent、ToolまたはVoice WorkloadはConversation Replyと異なるContext Windowを持つ可能性があるため、64,000 Tokenを全Workloadへ無条件に共用しない。具体的なBudgetは各PhaseのModel選定時に再確認する。
 

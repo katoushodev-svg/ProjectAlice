@@ -1,5 +1,6 @@
 package com.projectalice.backend.memory.application;
 
+import com.projectalice.backend.memory.application.port.TokenEstimator;
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.port.out.PersonalMemoryRepository;
 import com.projectalice.backend.memory.domain.PersonalMemory;
@@ -9,6 +10,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 
 /**
@@ -23,27 +25,29 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
     private final MemoryRelevanceRankingPolicy rankingPolicy;
     private final MemoryDeduplicationPolicy deduplicationPolicy;
     private final MemoryDiversityPolicy diversityPolicy;
+    private final TokenEstimator tokenEstimator;
+    private final MemoryContextPayloadSerializer payloadSerializer;
 
     public FindRelevantMemoriesService(
-            AnswerMemorySearchPort searchPort, PersonalMemoryRepository personalMemoryRepository) {
-        this(
-                searchPort,
-                personalMemoryRepository,
+            AnswerMemorySearchPort searchPort,
+            PersonalMemoryRepository personalMemoryRepository,
+            TokenEstimator tokenEstimator,
+            MemoryContextPayloadSerializer payloadSerializer) {
+        this(searchPort, personalMemoryRepository,
                 MemoryRelevanceRankingPolicy.preservingInputOrder(),
                 MemoryDeduplicationPolicy.preservingCandidates(),
-                MemoryDiversityPolicy.preservingCandidates());
+                MemoryDiversityPolicy.preservingCandidates(), tokenEstimator, payloadSerializer);
     }
 
     public FindRelevantMemoriesService(
             AnswerMemorySearchPort searchPort,
             PersonalMemoryRepository personalMemoryRepository,
-            MemoryRelevanceRankingPolicy rankingPolicy) {
-        this(
-                searchPort,
-                personalMemoryRepository,
-                rankingPolicy,
+            MemoryRelevanceRankingPolicy rankingPolicy,
+            TokenEstimator tokenEstimator,
+            MemoryContextPayloadSerializer payloadSerializer) {
+        this(searchPort, personalMemoryRepository, rankingPolicy,
                 MemoryDeduplicationPolicy.preservingCandidates(),
-                MemoryDiversityPolicy.preservingCandidates());
+                MemoryDiversityPolicy.preservingCandidates(), tokenEstimator, payloadSerializer);
     }
 
     public FindRelevantMemoriesService(
@@ -51,7 +55,9 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             PersonalMemoryRepository personalMemoryRepository,
             MemoryRelevanceRankingPolicy rankingPolicy,
             MemoryDeduplicationPolicy deduplicationPolicy,
-            MemoryDiversityPolicy diversityPolicy) {
+            MemoryDiversityPolicy diversityPolicy,
+            TokenEstimator tokenEstimator,
+            MemoryContextPayloadSerializer payloadSerializer) {
         this.rankingPolicy = Objects.requireNonNull(rankingPolicy, "rankingPolicy must not be null");
         this.deduplicationPolicy =
                 Objects.requireNonNull(deduplicationPolicy, "deduplicationPolicy must not be null");
@@ -59,6 +65,8 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
         this.searchPort = Objects.requireNonNull(searchPort, "searchPort must not be null");
         this.personalMemoryRepository = Objects.requireNonNull(
                 personalMemoryRepository, "personalMemoryRepository must not be null");
+        this.tokenEstimator = Objects.requireNonNull(tokenEstimator, "tokenEstimator must not be null");
+        this.payloadSerializer = Objects.requireNonNull(payloadSerializer, "payloadSerializer must not be null");
     }
 
     @Override
@@ -71,19 +79,22 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             throw new IllegalArgumentException("unsupported purpose: " + purpose);
         }
 
-        List<MemorySearchCandidate> candidates;
+        AnswerMemorySearchResult searchResult;
         try {
-            candidates = searchPort.findCandidates(query);
+            searchResult = searchPort.findCandidates(query);
         } catch (RuntimeException e) {
             return FindRelevantMemoriesResult.unavailable();
         }
-        if (candidates == null) {
+        if (searchResult == null || searchResult.completeness() == SearchCompleteness.UNAVAILABLE) {
             return FindRelevantMemoriesResult.unavailable();
         }
+        List<MemorySearchCandidate> candidates = searchResult.candidates();
 
         int candidateLimit = Math.min(candidates.size(), query.contextBudget().maxCandidateItems());
         List<MemoryRankingCandidate> eligible = new ArrayList<>();
-        boolean partial = false;
+        // Search completeness describes candidate generation; the Application cap only
+        // makes this stage's hydration incomplete and must remain separately observable.
+        boolean partial = candidates.size() > candidateLimit;
         for (int i = 0; i < candidateLimit; i++) {
             MemorySearchCandidate candidate = candidates.get(i);
             if (candidate == null) {
@@ -103,26 +114,36 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             memory.flatMap(m -> toRankingCandidate(query, candidate, m)).ifPresent(eligible::add);
         }
 
+        if (candidates.isEmpty()) {
+            return new FindRelevantMemoriesResult(
+                    searchResult.completeness(),
+                    FindRelevantMemoriesResult.HydrationStatus.COMPLETE,
+                    List.of(),
+                    "",
+                    FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED,
+                    OptionalLong.empty());
+        }
+
         List<MemoryRankingCandidate> ranked = List.copyOf(rankingPolicy.rank(query, List.copyOf(eligible)));
         List<MemoryRankingCandidate> deduplicated =
                 List.copyOf(deduplicationPolicy.deduplicate(query, ranked));
         List<MemoryRankingCandidate> diversified =
                 List.copyOf(diversityPolicy.diversify(query, deduplicated));
-        List<MemoryContextItem> items = applyContextBudget(diversified, query.contextBudget());
+        Selection selection = applyContextBudget(diversified, query.contextBudget());
 
         return new FindRelevantMemoriesResult(
-                partial ? FindRelevantMemoriesResult.Status.PARTIAL : FindRelevantMemoriesResult.Status.COMPLETE,
-                items);
+                searchResult.completeness(),
+                partial ? FindRelevantMemoriesResult.HydrationStatus.PARTIAL
+                        : FindRelevantMemoriesResult.HydrationStatus.COMPLETE,
+                selection.items(), selection.payload(), selection.estimationStatus(), selection.estimatedTokenCount());
     }
 
-    /**
-     * Applies the available item and UTF-8 limits after Step 4-4. Token estimation is not
-     * implemented yet, so this is the explicit §14.16 fallback path.
-     */
-    private static List<MemoryContextItem> applyContextBudget(
+    private Selection applyContextBudget(
             List<MemoryRankingCandidate> diversified, MemoryContextBudget budget) {
         List<MemoryContextItem> selected = new ArrayList<>();
         long usedUtf8Bytes = 0;
+        String selectedPayload = "";
+        long selectedTokenCount = 0;
         for (MemoryRankingCandidate candidate : diversified) {
             if (selected.size() >= budget.maxFinalItems()) {
                 break;
@@ -134,11 +155,63 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 continue;
             }
 
+            List<MemoryContextItem> proposed = new ArrayList<>(selected);
+            proposed.add(item);
+            String proposedPayload = payloadSerializer.serialize(proposed);
+            TokenEstimationResult estimate;
+            try {
+                estimate = tokenEstimator.estimate(proposedPayload);
+            } catch (RuntimeException exception) {
+                return fallbackSelection(diversified, budget);
+            }
+            if (estimate == null || estimate instanceof TokenEstimationResult.Unavailable) {
+                return fallbackSelection(diversified, budget);
+            }
+            long proposedTokenCount = ((TokenEstimationResult.Estimated) estimate).tokenCount();
+            if (proposedTokenCount > budget.maxEstimatedTokens()) {
+                continue;
+            }
+
+            selected.add(item);
+            usedUtf8Bytes += itemUtf8Bytes;
+            selectedPayload = proposedPayload;
+            selectedTokenCount = proposedTokenCount;
+        }
+        return new Selection(
+                List.copyOf(selected),
+                selectedPayload,
+                FindRelevantMemoriesResult.EstimationStatus.ESTIMATED,
+                OptionalLong.of(selectedTokenCount));
+    }
+
+    private Selection fallbackSelection(List<MemoryRankingCandidate> diversified, MemoryContextBudget budget) {
+        List<MemoryContextItem> selected = new ArrayList<>();
+        long usedUtf8Bytes = 0;
+        for (MemoryRankingCandidate candidate : diversified) {
+            if (selected.size() >= budget.maxFinalItems()) {
+                break;
+            }
+            MemoryContextItem item = candidate.item();
+            long itemUtf8Bytes = item.content().getBytes(StandardCharsets.UTF_8).length;
+            if (itemUtf8Bytes > budget.maxUtf8Bytes() - usedUtf8Bytes) {
+                continue;
+            }
             selected.add(item);
             usedUtf8Bytes += itemUtf8Bytes;
         }
-        return List.copyOf(selected);
+        List<MemoryContextItem> result = List.copyOf(selected);
+        return new Selection(
+                result,
+                payloadSerializer.serialize(result),
+                FindRelevantMemoriesResult.EstimationStatus.UNAVAILABLE,
+                OptionalLong.empty());
     }
+
+    private record Selection(
+            List<MemoryContextItem> items,
+            String payload,
+            FindRelevantMemoriesResult.EstimationStatus estimationStatus,
+            OptionalLong estimatedTokenCount) {}
 
     private Optional<MemoryRankingCandidate> toRankingCandidate(
             MemoryRetrievalQuery query, MemorySearchCandidate candidate, PersonalMemory memory) {

@@ -30,6 +30,44 @@ class TextGenerationRequestTest {
     }
 
     @Test
+    void createsRequestWithOrderedImmutableContextBlocks() {
+        List<AiContextBlock> blocks = new ArrayList<>(List.of(
+                new AiContextBlock("opaque-1", AiContextSource.PERSONAL_MEMORY, "[\"memory\"]"),
+                new AiContextBlock("opaque-2", AiContextSource.EXTERNAL_CONTENT, "external")));
+
+        TextGenerationRequest request = new TextGenerationRequest(
+                AiWorkload.CONVERSATION_REPLY,
+                "Follow the conversation rules",
+                List.of(new AiMessage(AiMessageRole.USER, "Current message")),
+                blocks);
+
+        assertEquals(blocks, request.contextBlocks());
+        blocks.clear();
+        assertEquals(2, request.contextBlocks().size());
+        assertThrows(UnsupportedOperationException.class, () -> request.contextBlocks().clear());
+    }
+
+    @Test
+    void legacyConstructorCreatesRequestWithoutContextBlocks() {
+        TextGenerationRequest request = new TextGenerationRequest(
+                AiWorkload.CONVERSATION_REPLY,
+                "instructions",
+                List.of(new AiMessage(AiMessageRole.USER, "Hello")));
+
+        assertEquals(List.of(), request.contextBlocks());
+    }
+
+    @Test
+    void rejectsNullContextBlocksAndEntries() {
+        assertThrows(NullPointerException.class, () -> new TextGenerationRequest(
+                AiWorkload.CONVERSATION_REPLY, "instructions",
+                List.of(new AiMessage(AiMessageRole.USER, "Hello")), null));
+        assertThrows(NullPointerException.class, () -> new TextGenerationRequest(
+                AiWorkload.CONVERSATION_REPLY, "instructions",
+                List.of(new AiMessage(AiMessageRole.USER, "Hello")), java.util.Arrays.asList((AiContextBlock) null)));
+    }
+
+    @Test
     void rejectsNullWorkload() {
         assertThrows(NullPointerException.class, () -> new TextGenerationRequest(
                 null,

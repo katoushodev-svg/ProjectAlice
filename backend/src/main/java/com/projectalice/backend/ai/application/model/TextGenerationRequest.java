@@ -7,8 +7,13 @@ import java.util.Objects;
 public record TextGenerationRequest(
         AiWorkload workload,
         String instructions,
-        List<AiMessage> messages
+        List<AiMessage> messages,
+        List<AiContextBlock> contextBlocks
 ) {
+    public TextGenerationRequest(AiWorkload workload, String instructions, List<AiMessage> messages) {
+        this(workload, instructions, messages, List.of());
+    }
+
     public TextGenerationRequest {
         Objects.requireNonNull(workload, "workload must not be null");
         Objects.requireNonNull(instructions, "instructions must not be null");
@@ -37,5 +42,12 @@ public record TextGenerationRequest(
         }
 
         messages = List.copyOf(validatedMessages);
+
+        Objects.requireNonNull(contextBlocks, "contextBlocks must not be null");
+        List<AiContextBlock> validatedContextBlocks = new ArrayList<>(contextBlocks.size());
+        for (AiContextBlock contextBlock : contextBlocks) {
+            validatedContextBlocks.add(Objects.requireNonNull(contextBlock, "contextBlock must not be null"));
+        }
+        contextBlocks = List.copyOf(validatedContextBlocks);
     }
 }

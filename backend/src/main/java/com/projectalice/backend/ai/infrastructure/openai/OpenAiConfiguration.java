@@ -38,13 +38,18 @@ public class OpenAiConfiguration {
     }
 
     @Bean
-    TextGenerationProvider openAiTextGenerationProvider(OpenAiCallExecutor executor, OpenAiSettings settings) {
-        return new OpenAiTextGenerationProvider(executor, new OpenAiRequestMapper(settings));
+    OpenAiRequestMapper openAiRequestMapper(OpenAiSettings settings) {
+        return new OpenAiRequestMapper(settings);
     }
 
     @Bean
-    InputTokenCounter openAiInputTokenCounter(OpenAiCallExecutor executor, OpenAiSettings settings) {
-        return new OpenAiInputTokenCounter(executor, new OpenAiRequestMapper(settings));
+    TextGenerationProvider openAiTextGenerationProvider(OpenAiCallExecutor executor, OpenAiRequestMapper requestMapper) {
+        return new OpenAiTextGenerationProvider(executor, requestMapper);
+    }
+
+    @Bean
+    InputTokenCounter openAiInputTokenCounter(OpenAiCallExecutor executor, OpenAiRequestMapper requestMapper) {
+        return new OpenAiInputTokenCounter(executor, requestMapper);
     }
 
     // The client is built on first use so a missing key fails the call, not application startup.

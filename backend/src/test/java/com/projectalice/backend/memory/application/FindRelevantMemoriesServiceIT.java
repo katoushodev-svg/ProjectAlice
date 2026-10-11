@@ -9,6 +9,7 @@ import com.projectalice.backend.memory.domain.MemoryContent;
 import com.projectalice.backend.memory.domain.MemoryId;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import com.projectalice.backend.memory.domain.SensitivityLevel;
+import com.projectalice.backend.memory.infrastructure.JTokkitTokenEstimator;
 import com.projectalice.backend.memory.infrastructure.persistence.dynamodb.DynamoDbPersonalMemoryRepository;
 import java.net.URI;
 import java.time.Duration;
@@ -107,15 +108,17 @@ class FindRelevantMemoriesServiceIT {
                 new MemorySearchCandidate(MemoryId.generate(), 1, Set.of()),
                 new MemorySearchCandidate(
                         memory.memoryId(), memory.version(), Set.of(MemorySearchSignal.KEYWORD_MATCH)));
-        AnswerMemorySearchPort searchPort = query -> candidates;
-        FindRelevantMemoriesService service = new FindRelevantMemoriesService(searchPort, repository);
+        AnswerMemorySearchPort searchPort = query -> AnswerMemorySearchResult.complete(candidates);
+        FindRelevantMemoriesService service = new FindRelevantMemoriesService(
+                searchPort, repository, new JTokkitTokenEstimator(), new MemoryContextPayloadSerializer());
 
         FindRelevantMemoriesResult result = service.execute(new MemoryRetrievalQuery(
                 MemoryRetrievalPurpose.ANSWER_CURRENT, "What language does Alice use?",
                 null, null, null, null, MemoryTemporalIntent.CURRENT,
                 MemoryContextBudget.baseline(), "req-it-1"));
 
-        assertEquals(FindRelevantMemoriesResult.Status.COMPLETE, result.status());
+        assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.COMPLETE, result.hydrationStatus());
         assertEquals(1, result.items().size());
         MemoryContextItem item = result.items().get(0);
         assertEquals(memory.memoryId(), item.memoryId());

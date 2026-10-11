@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.port.out.PersonalMemoryRepository;
+import com.projectalice.backend.memory.application.port.TokenEstimator;
 import com.projectalice.backend.memory.domain.CaptureType;
 import com.projectalice.backend.memory.domain.MemoryCategory;
 import com.projectalice.backend.memory.domain.MemoryContent;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 class FindRelevantMemoriesServiceTest {
@@ -32,7 +34,16 @@ class FindRelevantMemoriesServiceTest {
 
     private final FakeRepository repository = new FakeRepository();
     private final FakeSearchPort searchPort = new FakeSearchPort();
-    private final FindRelevantMemoriesService service = new FindRelevantMemoriesService(searchPort, repository);
+    private final List<String> countedPayloads = new ArrayList<>();
+    private Function<String, TokenEstimationResult> estimation =
+            payload -> {
+                countedPayloads.add(payload);
+                return new TokenEstimationResult.Estimated(10);
+            };
+    private final TokenEstimator tokenEstimator = payload -> estimation.apply(payload);
+    private final MemoryContextPayloadSerializer serializer = new MemoryContextPayloadSerializer();
+    private final FindRelevantMemoriesService service =
+            new FindRelevantMemoriesService(searchPort, repository, tokenEstimator, serializer);
 
     @Test
     void queryRequiresCurrentUserContent() {
@@ -59,7 +70,8 @@ class FindRelevantMemoriesServiceTest {
                 query(MemoryRetrievalPurpose.ANSWER_CURRENT, "java"));
 
         assertEquals(List.of(memory.memoryId()), repository.requestedIds);
-        assertEquals(FindRelevantMemoriesResult.Status.COMPLETE, result.status());
+        assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.COMPLETE, result.hydrationStatus());
         MemoryContextItem item = result.items().get(0);
         assertEquals("Uses Java.", item.content());
         assertEquals(MemoryTemporalRole.CURRENT, item.temporalRole());
@@ -81,7 +93,68 @@ class FindRelevantMemoriesServiceTest {
                 query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
 
         assertTrue(result.items().isEmpty());
-        assertEquals(FindRelevantMemoriesResult.Status.COMPLETE, result.status());
+        assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.COMPLETE, result.hydrationStatus());
+    }
+
+    @Test
+    void completeEmptySearchIsAValidEmptyResultWithoutHydrationOrEstimation() {
+        searchPort.candidates = List.of();
+
+        FindRelevantMemoriesResult result = service.execute(
+                query(MemoryRetrievalPurpose.ANSWER_CURRENT, "no match"));
+
+        assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.COMPLETE, result.hydrationStatus());
+        assertTrue(result.items().isEmpty());
+        assertEquals("", result.payload());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED, result.estimationStatus());
+        assertEquals(1, searchPort.received.size());
+        assertTrue(countedPayloads.isEmpty());
+    }
+
+    @Test
+    void partialSearchWithVerifiedCandidatesPreservesSearchPartiality() {
+        PersonalMemory memory = repository.add(memory("Verified partial candidate.", MemoryCategory.PROJECT));
+        searchPort.completeness = SearchCompleteness.PARTIAL;
+        searchPort.candidates = List.of(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
+
+        FindRelevantMemoriesResult result = service.execute(
+                query(MemoryRetrievalPurpose.ANSWER_CURRENT, "partial"));
+
+        assertEquals(SearchCompleteness.PARTIAL, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.COMPLETE, result.hydrationStatus());
+        assertEquals(List.of("Verified partial candidate."), result.items().stream().map(MemoryContextItem::content).toList());
+    }
+
+    @Test
+    void partialSearchWithNoVerifiedCandidatesDoesNotBecomeCompleteEmptySearch() {
+        searchPort.completeness = SearchCompleteness.PARTIAL;
+        searchPort.candidates = List.of();
+
+        FindRelevantMemoriesResult result = service.execute(
+                query(MemoryRetrievalPurpose.ANSWER_CURRENT, "partial with no verified hits"));
+
+        assertEquals(SearchCompleteness.PARTIAL, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.COMPLETE, result.hydrationStatus());
+        assertTrue(result.items().isEmpty());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED, result.estimationStatus());
+    }
+
+    @Test
+    void unavailableSearchIsNotTreatedAsSuccessfulEmptySearch() {
+        searchPort.completeness = SearchCompleteness.UNAVAILABLE;
+        searchPort.candidates = List.of();
+
+        FindRelevantMemoriesResult result = service.execute(
+                query(MemoryRetrievalPurpose.ANSWER_CURRENT, "search unavailable"));
+
+        assertEquals(SearchCompleteness.UNAVAILABLE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.NOT_ATTEMPTED, result.hydrationStatus());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED, result.estimationStatus());
+        assertTrue(result.items().isEmpty());
+        assertTrue(repository.requestedIds.isEmpty());
+        assertTrue(countedPayloads.isEmpty());
     }
 
     @Test
@@ -153,7 +226,8 @@ class FindRelevantMemoriesServiceTest {
         FindRelevantMemoriesResult result = service.execute(
                 query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
 
-        assertEquals(FindRelevantMemoriesResult.Status.UNAVAILABLE, result.status());
+        assertEquals(SearchCompleteness.UNAVAILABLE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.NOT_ATTEMPTED, result.hydrationStatus());
         assertTrue(result.items().isEmpty());
     }
 
@@ -169,7 +243,8 @@ class FindRelevantMemoriesServiceTest {
         FindRelevantMemoriesResult result = service.execute(
                 query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
 
-        assertEquals(FindRelevantMemoriesResult.Status.PARTIAL, result.status());
+        assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.PARTIAL, result.hydrationStatus());
         assertEquals(1, result.items().size());
         assertEquals("Healthy.", result.items().get(0).content());
     }
@@ -183,12 +258,14 @@ class FindRelevantMemoriesServiceTest {
         }
         searchPort.candidates = candidates;
 
-        service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
+        FindRelevantMemoriesResult result = service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
 
         assertEquals(MemoryContextBudget.DEFAULT_MAX_CANDIDATE_ITEMS, repository.requestedIds.size());
         assertEquals(candidates.subList(0, MemoryContextBudget.DEFAULT_MAX_CANDIDATE_ITEMS).stream()
                         .map(MemorySearchCandidate::memoryId).toList(),
                 repository.requestedIds);
+        assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.PARTIAL, result.hydrationStatus());
     }
 
     @Test
@@ -249,11 +326,87 @@ class FindRelevantMemoriesServiceTest {
                         (q, ranked) -> ranked,
                         (q, ranked) -> ranked,
                         (q, diversified) -> List.of(
-                                diversified.get(2), diversified.get(0), diversified.get(1), diversified.get(3)))
+                                diversified.get(2), diversified.get(0), diversified.get(1), diversified.get(3)),
+                        tokenEstimator,
+                        serializer)
                 .execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x", budget));
 
         assertEquals(List.of(originalOrder.get(2), originalOrder.get(0), originalOrder.get(1)),
                 result.items().stream().map(MemoryContextItem::content).toList());
+    }
+
+    @Test
+    void estimatesCompleteCumulativePayloadAndContinuesAfterAnOversizedCandidate() {
+        addCandidate("first");
+        addCandidate("bulky");
+        addCandidate("later");
+        estimation = payload -> {
+            countedPayloads.add(payload);
+            return new TokenEstimationResult.Estimated(payload.contains("bulky") ? 1501 : 200);
+        };
+
+        FindRelevantMemoriesResult result = service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
+
+        assertEquals(List.of("first", "later"), result.items().stream().map(MemoryContextItem::content).toList());
+        assertEquals(List.of("[\"first\"]", "[\"first\",\"bulky\"]", "[\"first\",\"later\"]"), countedPayloads);
+        assertEquals(countedPayloads.get(2), result.payload());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.ESTIMATED, result.estimationStatus());
+        assertEquals(200, result.estimatedTokenCount().orElseThrow());
+    }
+
+    @Test
+    void acceptsPayloadExactlyAtEstimatedTokenLimit() {
+        addCandidate("at-cap");
+        estimation = payload -> new TokenEstimationResult.Estimated(1500);
+
+        FindRelevantMemoriesResult result = service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
+
+        assertEquals(List.of("at-cap"), result.items().stream().map(MemoryContextItem::content).toList());
+        assertEquals(1500, result.estimatedTokenCount().orElseThrow());
+    }
+
+    @Test
+    void estimatorFailureDiscardsPartialTokenSelectionAndUsesOriginalDiversifiedCandidates() {
+        addCandidate("first");
+        addCandidate("second");
+        addCandidate("third");
+        estimation = payload -> {
+            countedPayloads.add(payload);
+            return countedPayloads.size() == 1
+                    ? new TokenEstimationResult.Estimated(100)
+                    : new TokenEstimationResult.Unavailable();
+        };
+
+        FindRelevantMemoriesResult result = service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
+
+        assertEquals(List.of("first", "second", "third"), result.items().stream().map(MemoryContextItem::content).toList());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.UNAVAILABLE, result.estimationStatus());
+        assertTrue(result.estimatedTokenCount().isEmpty());
+        assertEquals("[\"first\",\"second\",\"third\"]", result.payload());
+    }
+
+    @Test
+    void estimatorRuntimeExceptionUsesByteAndItemFallback() {
+        addCandidate("éé");
+        addCandidate("ok");
+        estimation = payload -> {
+            throw new IllegalStateException("tokenizer unavailable");
+        };
+
+        FindRelevantMemoriesResult result = new FindRelevantMemoriesService(
+                        searchPort, repository, tokenEstimator, serializer)
+                .execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x", new MemoryContextBudget(40, 8, 1500, 3)));
+
+        assertEquals(List.of("ok"), result.items().stream().map(MemoryContextItem::content).toList());
+        assertEquals("[\"ok\"]", result.payload());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.UNAVAILABLE, result.estimationStatus());
+    }
+
+    private void addCandidate(String content) {
+        PersonalMemory memory = repository.add(memory(content, MemoryCategory.PROJECT));
+        List<MemorySearchCandidate> updated = new ArrayList<>(searchPort.candidates);
+        updated.add(new MemorySearchCandidate(memory.memoryId(), 1, Set.of()));
+        searchPort.candidates = List.copyOf(updated);
     }
 
     @Test
@@ -296,16 +449,17 @@ class FindRelevantMemoriesServiceTest {
 
     private static final class FakeSearchPort implements AnswerMemorySearchPort {
         List<MemorySearchCandidate> candidates = List.of();
+        SearchCompleteness completeness = SearchCompleteness.COMPLETE;
         RuntimeException failure;
         final List<MemoryRetrievalQuery> received = new ArrayList<>();
 
         @Override
-        public List<MemorySearchCandidate> findCandidates(MemoryRetrievalQuery query) {
+        public AnswerMemorySearchResult findCandidates(MemoryRetrievalQuery query) {
             received.add(query);
             if (failure != null) {
                 throw failure;
             }
-            return candidates;
+            return new AnswerMemorySearchResult(completeness, candidates);
         }
     }
 

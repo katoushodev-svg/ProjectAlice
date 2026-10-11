@@ -1061,3 +1061,264 @@ Related Documents
 Result
 
 Memory Token EstimatorのApplication契約と実行時Fallbackの意味をAcceptedとする。EstimatorのAlgorithmと実装はDeferredのままである。本ADR単独ではSource CodeやDependency Injection設定を変更しない。
+
+⸻
+
+ADR-016 Memory Context Payload Serializationと累積Token計数
+
+Status
+
+Accepted
+
+⸻
+
+Context
+
+ADR-015はMemory Application所有のProvider非依存`TokenEstimator`と、実際にMemory Contextへ含めるPayloadを推定対象にする契約を確定した。一方、Memory payloadの具体形式と候補追加時の計数方法はDeferredだった。
+
+Phase 2の実装前に、Memory Applicationが返す`MemoryContextItem`と、将来Conversation Contextへ渡すデータの間で、計数対象を再現可能にする必要がある。Memory専用1,500-token BudgetはPhase 1の`ai.application.InputTokenCounter`が計数するGeneration Request全体の64,000-token Budgetとは責務と対象範囲が異なる。
+
+Decision
+
+1. Memory Applicationは、選別対象となる`MemoryContextItem`列から、本文だけを要素とする順序付きcompact JSON文字列配列を単一のProvider非依存Payloadとして生成する。0件の場合はMemory Context blockを作らず空文字列とする。
+2. Payloadの配列順序は最終選別順序と一致させる。Memory本文は保存時にDomainが確定した文字列を使い、Payload生成時にtrim、Unicode正規化、空白変更または内容変更をしない。JSONに必要なquote、backslash、control character escapingおよび不対surrogate code unitのlowercase hex escapingを行い、有効なsurrogate pairとその他のUnicodeをUTF-8で保持し、BOMなしで出力する。
+3. Payloadへ含めるMemoryContextItem Fieldは`content`のみとする。ID、Version、Category、State、Sensitivity Level、Temporal RoleおよびRelevance Reason Codesは選別・Validation・Trace用の内部情報として扱う。Sensitivity Level等のPolicy MetadataをProviderへ開示しない。Provider-neutralなContext Source Type `PERSONAL_MEMORY`は将来Context構造で別途表現し、Payload本文には重ねて挿入しない。
+4. 12 KiB上限はPayload Serialization overheadではなく、選択Memory本文のUTF-8 byte数合計に適用する。TokenEstimatorはcompact JSON配列全体を推定し、JSON framingおよびescaping overheadもToken数に含める。
+5. 候補はRanking、DeduplicationおよびDiversity後の順序で評価する。各候補の採否では、既選択候補と当該候補から再生成した累積Payload全体を計数する。個別計数の合算は採用しない。Tokenまたはbyte上限を超える候補は省略し、後続候補を現在の選択済みListに対して評価する。8件に達した時点で終了する。本文は切断しない。
+6. Budget計数に使った選択済み本文順とPayload本文を、後続Conversation Contextへそのまま渡す。同じPayload Stringを再利用し、AI Context BuilderおよびProvider Adapterが本文をtrim、再serialize、再分割またはラベル付けしない。Provider Requestのrole / block framingはMemory専用Payload外の構造であり、Generation Request全体の計数はAI Featureの`InputTokenCounter`が担う。
+7. TokenEstimator実行時失敗時は、Token Budgetによる部分選択を破棄し、元のdiversified候補から§14.16の最大8件・本文UTF-8最大12 KiB Fallbackを適用する。Fallback時は1,500-token上限を保証しない。Estimator未登録はADR-015どおり起動時Configuration Errorとする。
+8. Token Estimation Algorithm、Library、Encodingおよび精度目標は本ADRで決定しない。Payload Serialization形式を決定することは、JTokkit等のTokenizer採用を決定することを意味しない。
+
+Alternatives Considered
+
+Memory本文を個別計数し、その合計を累積値として使う
+
+実装は単純で候補単位の見積もりを再利用できるが、JSON区切りやescaping overheadを含まず、BPEの結合境界変化によって最終Payload計数と異なり得るため採用しない。
+
+Memory本文を空行で連結する
+
+読みやすく単純だが、Memory本文自体が改行や空行を含む場合の境界表現が曖昧になる。JSON配列なら各本文を一要素として決定的に区別でき、構造とescaping overheadも明示的に計数できるため採用しない。
+
+Category、Temporal Role、SensitivityまたはID等を本文に付加する
+
+Modelに追加情報を渡せる一方、それら全FieldをProviderへ開示する必要性は承認設計にない。Sensitivityなど内部Policy情報の不用意な開示とtoken増加を避けるため、現時点では本文Payloadへ含めない。
+
+候補ごとの計数で上限超過したら検索順の残りを終了する
+
+保守的で処理回数は少ないが、後続候補の本文が小さくても採用機会を失う。Ranking順は維持しつつ、超過候補を省略して後続を個別に累積評価する方が既存Byte上限選択のskip動作と整合する。
+
+Consequences
+
+Positive
+
+- Memory Token Budgetの対象がProvider非依存かつ再現可能となる。
+- Estimatorは最終候補列と同一の累積文字列を計数し、分割計数の境界誤差を避ける。
+- 検索・Trace MetadataとMemory本文を分離し、Policy MetadataのProvider開示を防ぐ。
+- Token Budgetと12 KiB本文Byte Budgetの対象差が明示される。
+
+Negative
+
+- Compact JSON serialization overheadもMemory Token Budgetを消費する。
+- 候補ごとに累積Payloadを再生成・再計数するため、個別計数よりCPU処理が増える。
+- 将来Provider Context MappingがPayload本文を変更した場合は、設計違反となり、Memory側SerializerとContext接続を同時に見直す必要がある。
+
+Implementation Rules
+
+- Memory Application内に一つの決定的Payload Serializerを設け、Budget計数用とContext受渡し用で共有する。
+- Serializer、Estimator、候補選択を独立したUnit Testで検証する。
+- TestはField除外、候補順序、JSON escaping、Unicode保持、空List、累積計数、超過候補後の継続、8件・12 KiB・1,500-token上限およびUnavailable時の全候補fallbackを保証する。
+- AI Context接続Testでは、Budget計数に使用したPayloadとProviderへ渡すContext block contentが完全一致することを検証する。
+- Memory ApplicationはOpenAI SDK、Provider固有Requestまたは`ai.application.InputTokenCounter`へ依存しない。
+
+Related Documents
+
+- `memory-design.md` §14.9、§14.10、§14.11、§14.16、§14.18
+- `ai-design.md` §11.7、§11.10、§11.11、§11.12
+- `test-design.md`
+- ADR-015
+
+Result
+
+Memory Context Payloadの本文Field、compact JSON配列Serialization、Byte計数対象、累積Token推定および実行時失敗時のFallbackをAcceptedとする。Memory-to-Conversation Context接続はADR-017で別途確定する。Token Estimation Algorithm、Library、Encodingおよび精度評価は別工程で扱う。本ADRはSource Code、DependencyまたはDI設定を変更しない。
+
+⸻
+
+ADR-017 Memory-to-Conversation Context Integration
+
+Status
+
+Accepted
+
+⸻
+
+Context
+
+ADR-015はMemory Application所有のProvider-independent Token Estimator、実行時Unavailableと起動時Configuration Errorの区別、および推定失敗Fallbackを確定した。ADR-016はMemory Application所有の完成済みcompact JSON Payload、累積計数、payload本文をAI Context接続で変更しない契約を確定した。これらのDecisionではProvider RequestへのContext Mapping、Conversation Applicationとの呼出契約、Generation Request全体Budget時のMemory縮小、およびProvider直前の最終ValidationはDeferredだった。
+
+既存`ai-design.md` §11.10–§11.12にはMemoryをContext Dataとして扱う方針、Provider-independentな`AiContextBlock`概念、全RequestのBudget削減順がある。`phase2-detailed-design-final-review.md`はConversationからMemoryへの一方向Application capability利用と、MemoryがAIへ渡る際もinstruction / permissionにならないBoundaryをPassedとしている。本DecisionはそのOwnershipを変更せずApplication契約を実装可能な粒度へ定める。
+
+Phase 1の`TextGenerationRequest`にはinstructionsとrole付きmessagesだけがあり、`OpenAiRequestMapper`はこれらをResponses API Requestへ変換する。`InputTokenCounter`も同じRequest Mapperを介して全Requestを数える。Phase 2ではMemory blockを含む完全に同一のProvider inputをGenerationとCountで使う必要がある。
+
+Decision
+
+1. AI Applicationは順序付き`AiContextBlock`をProvider-independent Modelとして使用する。blockは内部`referenceId`、`source`、`content`を持つ。Memory blockのsourceは`PERSONAL_MEMORY`、contentはMemory Applicationが生成しToken Estimatorが計数した完成Payload Stringそのものである。0件または空Payloadではblockを作成しない。
+2. `TextGenerationRequest`は順序付きContext block Listを保持する。Context blockはinstructionsまたはCurrent User Messageへ連結しない。blockの並びを保持してConversation messagesの前にMappingし、会話message順は維持し、Current User Messageを最後にする。
+3. OpenAI Responses Adapterは各Context blockを、独立した低権限`user` role input messageとしてMappingする。Message contentにはblockの`content` Stringだけを渡す。role / message boundaryはPayload外部のwire framingであり、Payload本文にlabel、説明、ID、Reference、Sensitivity、検索理由、追加wrapper、再serializationまたは再分割を行わない。OpenAI APIの現行Responses入力はrole付きmessageとそのcontentをサポートする（公式API Reference: https://developers.openai.com/api/reference/resources/responses/methods/create）。
+4. `referenceId`、Memory ID / Version、Selection ReferenceおよびReset GenerationはApplication内のTrace / Validationにだけ使用し、Providerへ送信しない。`source`はProvider-independent Context Modelの分類であり、現在のOpenAI wire requestへ独自metadataとして追加しない。Provider AdapterはMemory blockをinstructionsまたはtool permissionへ昇格させない。
+5. Phase 2初期Sourceは`PERSONAL_MEMORY`だけである。AI Trusted Instructionsはinstructions直後かつConversation messages前のContext block messageをMemory Dataとして認識し、Memory本文内の命令文をInstruction、Permission、ApprovalまたはSecurity Policyとして扱わず、Current User Messageと競合する場合は現在の明示指示を優先する。Current User MessageとMemory blockはどちらもResponses API `user` roleとなるため、そのrole / message順だけで情報優先度が保証されるとは扱わない。role / message境界単独をPrompt InjectionへのSecurity Boundaryとせず、Application Capability制御を維持する。新Context SourceのProvider識別契約は追加時に設計する。
+6. Conversation Applicationの`SendMessageUseCase`がMemory Application Use Caseを一方向に呼び、Memory検索の実行時期とQueryを調整する。QueryにはCurrent User Messageを必須として渡し、Memory Searchに必要な場合だけ最小限のConversation Context / intent / entity情報を含める。全Historyを無条件に渡さない。Memory ApplicationはConversation、AI Application、Provider RequestまたはConversation Repositoryへ依存しない。Context Compositionを行う`ConversationContextBuilder`はMemory Search・Persistence・Memory Policyを所有しない。
+7. Memory Searchが0件またはUnavailableならMemory blockを省略し、Memoryなしで会話を継続する。Token Estimator実行時UnavailableならMemory Applicationの最大8件 / UTF-8 12 KiB fallback resultを使用できるが、1,500-token適合とはみなさない。Estimator未登録はADR-015どおり起動時Configuration Errorとする。
+8. Memory Applicationは選択結果とPayloadに加え、選択時Reset GenerationおよびPayload順のMemory ID / Versionを照合できる内部Selection Referenceを保持する。`AiContextBlock.referenceId`はこのSelection Referenceへのopaqueな内部参照である。Context準備の最終ValidationはMemory Application BoundaryがAuthoritative Sourceに対して行う。ConversationからRepositoryやReset Generation Storeへ直接アクセスしない。
+9. 最終ValidationでReset Generation変更を検出した場合、そのSelection全体を無効にする。削除済み、Version変更またはEligibility失敗のMemoryは除外し、新Version Contentへ暗黙に置換しない。元の未選択最大40件Candidate Poolから代替候補を検索・補充しない。残存する検証済み選択Itemだけを元の相対順でMemory Applicationが再評価し、Payloadを再生成する。
+10. Generation Request全体が上限を超える場合、既存AI Budget Priorityを適用する。Current User Message、Base Identity、Feature / Permission Policy、Correctnessに必須なActive Tool / Agent Stateを除外しない。除外順はOld Conversation History、Low-relevance Personal Memory、Verbose Tool Result / External Content、Recent Conversation Historyとする。この削減Priorityは情報源の真偽・競合判断Priorityとは別である。
+11. Memory削減は元の最終選択Listだけに対して行う。ConversationはSelection Referenceと除外する選択Item ReferenceをMemory Applicationへ渡す。Memory Applicationは元Selection順の末尾Itemから一つずつ除外し、除外済みItemを復活させず、他の初回Search候補を加えない。各応答でPayloadを再生成し、最大8件、本文UTF-8 12 KiBおよび推定1,500 tokens Budgetを再適用する。指定可能な縮小上限は元のSelection以下かつ既定上限以下とする。0件は空Selection / blockなしで表す。本文切断は禁止する。
+12. Memory縮小はToken EstimatorがUnavailableでも進める。各段階で一項目以上を単調に除外し、返されたfallback Payloadを含むGeneration Request全体をInputTokenCounterで再計数する。Memory Estimatorの値をRequest全体のtoken数から差し引かない。元Selectionは最大8件なので最大8回の縮小でblockなしに到達する。blockが空になっても全体Budgetが超過する場合は残りのAI削減順を適用し、不可削除の最小Requestが超過する場合はGenerationを開始しない。
+13. Provider直前Validationは、Count済みRequestのSelection Reference・ID・Version・Reset Generationを再照合する。変化があれば無効Itemを除き、Memory Applicationが再生成・再BudgetしたPayloadでContextを再構築し、Memory BudgetとRequest全体Budgetを再計数してから安定確認を行う。各変更検出は少なくとも一Itemを失効・除外し、追加・代替を行わない。最大8件の除外と、安定確認を含む最大9回のValidationで終了する。Validation / 縮小の反復上限に先に達し、Count Stage Deadlineに残り時間がある場合はMemory blockを空にしてRequestを一度再計数する。Deadlineが先に尽きた場合、またはMemoryなしRequestもBudget超過・計数不能の場合はProviderへ送らない。
+14. 最終Validationが保証するのは、Memory ApplicationのAuthoritative Source確認時点でID、Version、Reset GenerationおよびEligibilityが有効だったことまでである。その直後の更新を排除するLock / Reservationは導入せず、検証後の更新が起き得ることを明記する。
+15. Text Generation AdapterとInput Token Count Adapterは同一のProvider Request Mapperを共有する。同じ`TextGenerationRequest`からinstructions、Context block順・content、Conversation message順・roleを一致させる。InputTokenCounterはContext blocksを含む完成Request全体を数え、Memory専用1,500-token Estimatorの代替にしない。
+16. Search失敗、最終Validation不能またはReset Generation不一致はMemoryなしへ切り替える。Memory本文、検索Query全文、Sensitive Content、秘密情報、Selection ReferenceまたはRaw Provider Responseを通常Logへ出力しない。InputTokenCounter失敗・Deadline超過時は未計数RequestをProviderへ送らず既定AI Failure / Retry Policyを適用する。
+
+Alternatives Considered
+
+MemoryをCurrent User Messageへ連結する
+
+RequestのMessage数を増やさずに済むが、会話上の現在User発話とMemory Dataの構造境界を失い、Current User Messageの完全性・優先性をテストで保証しにくいため採用しない。
+
+Memoryをinstructionsへ連結する
+
+一つのtext fieldで送れるが、指示階層とMemory Dataを混同し、Memory内の命令がTrusted Instructionとして扱われる危険を増やすため採用しない。
+
+OpenAI専用のContext BlockまたはMessage metadataをAI Application Modelへ追加する
+
+Responses API Mappingは可能でも、Provider固有ConceptをApplication Contractへ漏らすため採用しない。ApplicationはSource / Contentを持つProvider-independent blockとし、role MappingをAdapterへ閉じる。
+
+Budget超過ごとに元の最大40件Candidate Poolから検索し直す
+
+候補追加やRanking結果が再実行間に変わり、単調な縮小・有限終了を保証しにくい。Provider直前Validationで除外したMemoryが再追加される可能性もあるため採用しない。選択済み最大8件に限定し、順序を保つ縮小とする。
+
+Token Estimator Unavailable時はMemoryを残してRequest全体が収まると仮定する
+
+Generation Request全体の上限を保証できないため採用しない。推定器なしでもMemory Applicationへ一件ずつ除外を依頼し、そのPayloadを含む全RequestをCounterで確認する。Counter不能なら送信しない。
+
+最終Validation時に変更済みMemoryを最新Contentへ暗黙に置換する
+
+Budget計数済みPayloadとProviderへ送るPayloadが異なり、元のMemory selectionの根拠も失われるため採用しない。該当Memoryを除外して残りから再構成する。
+
+Generation Request全体が収まるまで無制限にValidate / Countを繰り返す
+
+外部Counter Call、Latencyおよび失敗時の無限処理につながるため採用しない。元選択最大8件の単調除外、最大9回のValidation、既定Count Stage Deadlineで終了する。
+
+Consequences
+
+Positive
+
+- Memory Application、Conversation ApplicationおよびProvider Adapterの所有Boundaryが保たれる。
+- Memory専用Payloadを変更せず、Memory Budget CountとContext Contentが一致する。
+- Estimator Unavailableでも有限なMemory縮小で全Request Budgetを実測し、未計数Requestは送らない。
+- Final Validation時に削除・更新・ResetされたMemoryを送信せず、Selection ReferenceをProviderへ漏らさない。
+- GenerationとInput Token Countのwire mappingが共通化される。
+
+Negative
+
+- Memory縮小およびFinal Validationに伴いMemory Application ContractとAI Context Builder / Request Modelの変更が必要となる。
+- Full Request Budgetを満たすための再計数回数とLatencyが増える。既存Input Token Count Stage Deadlineを超えた場合、Generationを中止する。
+- OpenAI `user` roleは構造上低権限だが、role boundaryだけではPrompt Injectionを防げない。Trusted InstructionsとApplication-side Capability controlが必要である。
+- Validation後からProvider受信までの競合更新はLock / Reservationを導入しないため排除できない。
+
+Implementation Rules
+
+- Provider input mappingはOpenAI Adapter内に閉じ、Responses APIの現行公式仕様とSDKを実装時にも確認する。
+- AI Context blockのcontent、Memory Selection ReferenceおよびProvider wire dataを別の型・責務で扱う。
+- Memory Request AdjustmentとFinal ValidationはMemory Applicationが選択順、Eligibility、Serializer、TokenEstimatorおよびfallbackを管理する。
+- Context blockがないRequestはPhase 1と同じinstructions/messages構造を保つ。
+- Testではblock order、user-role mapping、Current User Messageが最後であること、payload byte-for-byte一致、reference非送信、GenerationとCount Mapper一致、selection縮小単調性、Unavailable時の縮小、reset/version失効、反復上限およびCount失敗時のProvider未呼出しを保証する。
+- Memory本文、検索Query、Sensitive Content、Credential、Raw Provider ResponseをLogへ出さない。
+
+Review and Follow-up Trace
+
+- ADR-015: Memory Token Estimator Port、Estimated / Unavailable、Startup Configuration ErrorおよびMemory fallbackを維持する。
+- ADR-016: 完成Payload、累積計数、Payload不変性およびProvider-independent Memory Application Boundaryを維持する。
+- `phase2-detailed-design-final-review.md` §5のConversation ↔ Memory一方向Boundary、Memory ↔ AIのContext Data境界と整合する。Phase 2全体のReviewを再開せず、そのAccepted BoundaryのApplication Contractを詳細化する。
+- `memory-design.md` MD-138〜MD-140および`ai-design.md` §11.10〜§11.12へApplied Follow-upとして反映する。
+
+Related Documents
+
+- `memory-design.md` §14.9〜§14.16、§14.18、Decision MD-138〜MD-140
+- `ai-design.md` §8.8、§11.7、§11.9〜§11.12、§14.10
+- `phase2-detailed-design-final-review.md` §5
+- ADR-015、ADR-016
+- OpenAI Responses API Reference: https://developers.openai.com/api/reference/resources/responses/methods/create
+- OpenAI Input Token Count API Reference: https://developers.openai.com/api/reference/resources/responses/subresources/input_tokens/methods/count
+
+Result
+
+Memory-to-Conversation Context Model、OpenAI user-role Mapping、Conversation orchestration、Request Budget縮小、最終Validation、Mapper共有およびFailure PolicyをAcceptedとする。具体的なJava API / Class、Provider SDK Mapping、Selection Reference実装およびTestsは実装工程で定義し、本ADR単独ではSource Code、Dependency、ConfigurationまたはDIを変更しない。
+
+⸻
+
+ADR-018 Answer Search Weighted Ranking and Candidate Pool Selection
+
+Status
+
+Accepted
+
+⸻
+
+Context
+
+DB2-045〜DB2-066はKeyword Search方式、Posting / Unique Candidate上限、最終Answer Candidate Pool最大40件、Search Completenessおよび評価Targetを確定している。DB2-058のDeterministic Keyword RankはManagement Search専用である。Answer SearchではAdapter Keyword SignalとMemory Applicationで評価するEntity、Intent、Scope、Temporal、Confirmation、SensitivityおよびRedundancyを組み合わせる責務が決まっている一方、順位方式、40件への選択責務、Signal重み・尺度および欠損値処理は未決定だった。
+
+Decision
+
+1. Answer Searchは、Eligibility / 安全Policyを先に適用した後、Provider非依存Signalの重み付きスコア方式で候補を順位付けする。DB2-058のManagement Search Tupleは流用しない。Adapter / DynamoDBの返却順を順位にしない。Sensitivity、削除、Version、Reset Generation等のEligibilityまたは安全条件をRanking加点で代替しない。
+2. Answer SearchのPosting評価上限は1,000件、Adapterが生成するUnique Candidate上限は200件、Memory Applicationが形成するSearch Candidate Pool上限は40件とする。これらは互いに異なる段階の制限であり、DB2-045〜066の各制約を変更しない。
+3. 最大200件から最大40件への選別責務はMemory Applicationに置く。Adapterの入力順で先頭40件へ切り捨てない。Memory Applicationは候補をAuthoritative HydrationしEligibilityを適用した後、Application Relevance Ranking、DeduplicationおよびDiversityを経て最大40件のCandidate Poolを形成し、その後に既定Context Budgetで最大8件を選ぶ。上限は最大数であり、候補が適格でない、重複する、または存在しない場合に件数を埋めない。
+4. Search Adapterは候補のList順をRelevance順位として表現しない。Candidate Pool選択はSearch Completenessを変更しない。DB2-065またはDB2-055/057/061により検索が不完全な場合はMD-141に従って`PARTIAL` / `UNAVAILABLE`を保持し、検証済み候補だけを利用する。
+5. Signal契約は意味、型、観測元、欠損状態を区別できるProvider非依存表現とする。Keyword特徴はDistinct Term Match、Term Kind、Coverage、Query-side Hint MatchおよびPurpose別Signalを保持する。Application SignalはMemory Applicationで評価する。欠損は「未観測」であり、否定値、Eligibility通過または暗黙のゼロ点へ変換しない。
+6. 本Decisionでは具体的な重み、数値尺度、欠損SignalのScore集約規則、Minimum Relevance Thresholdまたは同点処理を定めない。これらはDB2-065の既存評価Targetの下で、定義済みDatasetと再現可能な比較に基づき別途確定する。未確定値を実装上の暗黙Defaultで補わない。
+7. Semantic SearchはDB2-066に基づく別判断前に必須化しない。初期Keyword Searchで利用できるSignalだけで動作する。
+
+Alternatives Considered
+
+DB2-058のManagement Search TupleをAnswer Searchへ流用する
+
+既に具体的なTupleがあるため初期実装は簡単だが、DB2-058がManagement Search専用であること、AnswerのTemporal / Confirmation / Redundancy等を含まないことから採用しない。
+
+Adapter返却順の先頭40件をCandidate Poolとする
+
+追加計算は少ないが、返却順が順位でないため選択結果がDynamoDB QueryやTerm順に左右され、DB2-065のRecall評価を歪めるため採用しない。
+
+重み付き方式の代わりに辞書順Tupleを新設する
+
+決定性と説明可能性は高いが、Signal間の絶対優先順位を固定し、既存Accepted契約にない順序を追加することになるため採用しない。
+
+Consequences
+
+Positive
+
+- Search Adapter、Memory Application Ranking、Eligibility、安全PolicyおよびContext Budgetの責務が分離される。
+- 最大40件の選択がAdapterの未定義順序に依存しない。
+- DB2-058、DB2-065およびDB2-066の適用範囲を維持する。
+
+Negative
+
+- Memory Applicationは最大200 Unique Candidateを対象にHydration / Eligibility / Rankingを行う可能性があり、処理時間をDB2-065の既存Latency Target内で評価する必要がある。
+- Rankingを本番採用するにはSignalの値尺度、重み、欠損規則および同点処理を評価後に確定する必要がある。本Decisionだけでは実装可能な最終数値式は完成しない。
+
+Evaluation and Implementation Rules
+
+- 匿名化・合成Scenario最低300件、Answer Current / Historical 100件、Relation 100件、Management 100件、および既存Recall / Precision / Safety / Latency Targetを維持する。新たな合否Targetを追加しない。
+- Ranking比較ではAnswer Required Memory Recall@40とAnswer Context Precision@8を既存Targetで評価し、Safety Target 0件を維持する。候補Pool選択、Ranking、Deduplication / DiversityおよびFinal Contextの各段階の結果を区別して記録する。
+- 候補200件上限やPosting 1,000件上限による切捨てが起きた場合、Search Completenessを`PARTIAL`等の既存契約で表現し、完全検索として扱わない。
+- DB2-065のDataset具体化は同Decisionの範囲内で行い、実ユーザー本文やProvider由来の機微情報を無断複製しない。
+- Unit / Integration TestではAdapter順に依存しないこと、最大200→最大40→最大8の各段階、EligibilityがRankingより先であること、超過・部分検索状態の保持、およびSignal欠損と否定Signalの区別を保証する。
+
+Related Documents
+
+- `memory-design.md` §14.7〜§14.9、§14.18、MD-141〜MD-142
+- `integrated/database-design.md` Section 36、DB2-045〜DB2-066（特にDB2-057、DB2-058、DB2-065、DB2-066）
+- ADR-015、ADR-016、ADR-017
+
+Result
+
+Answer Searchの重み付き順位方式、Application所有の200件から40件へのCandidate Pool選択、および既存Search Completeness / Eval契約との関係をAcceptedとする。具体的な重み、尺度、欠損集約規則、閾値および同点処理は未決定のままとし、DB2-065評価に基づく後続Decisionを必要とする。本ADRではSource Code、Test、Dependency、Database SchemaまたはDB2 Decisionを変更しない。

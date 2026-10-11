@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.port.out.PersonalMemoryRepository;
+import com.projectalice.backend.memory.application.port.TokenEstimator;
 import com.projectalice.backend.memory.domain.CaptureType;
 import com.projectalice.backend.memory.domain.MemoryCategory;
 import com.projectalice.backend.memory.domain.MemoryContent;
@@ -31,7 +32,7 @@ class MemoryRelevanceRankingFoundationTest {
     private final Map<MemoryId, PersonalMemory> store = new HashMap<>();
     private List<MemorySearchCandidate> candidates = List.of();
 
-    private final AnswerMemorySearchPort searchPort = query -> candidates;
+    private final AnswerMemorySearchPort searchPort = query -> AnswerMemorySearchResult.complete(candidates);
     private final PersonalMemoryRepository repository = new PersonalMemoryRepository() {
         @Override
         public void save(PersonalMemory memory) {
@@ -63,7 +64,7 @@ class MemoryRelevanceRankingFoundationTest {
         new FindRelevantMemoriesService(searchPort, repository, (q, c) -> {
             received.addAll(c);
             return c;
-        }).execute(query());
+        }, estimator(), serializer()).execute(query());
 
         assertEquals(1, received.size());
         MemoryContextItem item = received.get(0).item();
@@ -84,7 +85,7 @@ class MemoryRelevanceRankingFoundationTest {
         new FindRelevantMemoriesService(searchPort, repository, (q, c) -> {
             received.addAll(c);
             return c;
-        }).execute(query());
+        }, estimator(), serializer()).execute(query());
 
         assertEquals(1, received.size());
         assertEquals("New.", received.get(0).item().content());
@@ -100,7 +101,7 @@ class MemoryRelevanceRankingFoundationTest {
                 new MemorySearchCandidate(a.memoryId(), 1, Set.of()));
 
         FindRelevantMemoriesResult result =
-                new FindRelevantMemoriesService(searchPort, repository).execute(query());
+                new FindRelevantMemoriesService(searchPort, repository, estimator(), serializer()).execute(query());
 
         assertEquals(List.of("B.", "A."), result.items().stream().map(MemoryContextItem::content).toList());
     }
@@ -128,7 +129,9 @@ class MemoryRelevanceRankingFoundationTest {
                             stages.add("diversity");
                             assertEquals("Authoritative.", deduplicated.get(0).item().content());
                             return deduplicated;
-                        })
+                        },
+                        estimator(),
+                        serializer())
                 .execute(query());
 
         assertEquals(List.of("ranking", "deduplication", "diversity"), stages);
@@ -144,7 +147,7 @@ class MemoryRelevanceRankingFoundationTest {
                 new MemorySearchCandidate(memory.memoryId(), 1, Set.of(MemorySearchSignal.ENTITY_MATCH)));
 
         FindRelevantMemoriesResult result =
-                new FindRelevantMemoriesService(searchPort, repository).execute(query());
+                new FindRelevantMemoriesService(searchPort, repository, estimator(), serializer()).execute(query());
 
         assertEquals(2, result.items().size());
         assertEquals(List.of(memory.memoryId(), memory.memoryId()),
@@ -175,5 +178,13 @@ class MemoryRelevanceRankingFoundationTest {
     private static MemoryRetrievalQuery query() {
         return new MemoryRetrievalQuery(MemoryRetrievalPurpose.ANSWER_CURRENT, "x", null, null, null, null,
                 MemoryTemporalIntent.UNSPECIFIED, MemoryContextBudget.baseline(), "req-1");
+    }
+
+    private static TokenEstimator estimator() {
+        return payload -> new TokenEstimationResult.Estimated(0);
+    }
+
+    private static MemoryContextPayloadSerializer serializer() {
+        return new MemoryContextPayloadSerializer();
     }
 }

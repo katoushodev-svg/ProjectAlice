@@ -30,7 +30,8 @@ class OpenAiSmokeIT {
         var configuration = new OpenAiConfiguration();
         var settings = configuration.openAiSettings("gpt-5.6-terra", "low", 256);
         var executor = configuration.openAiCallExecutor(apiKey);
-        var provider = configuration.openAiTextGenerationProvider(executor, settings);
+        var mapper = configuration.openAiRequestMapper(settings);
+        var provider = configuration.openAiTextGenerationProvider(executor, mapper);
 
         var repository = org.mockito.Mockito.mock(com.projectalice.backend.conversation.application.port.ConversationRepository.class);
         org.mockito.Mockito.when(repository.findLatestMessages(org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of());
