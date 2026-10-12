@@ -231,7 +231,7 @@ Desktop preferred:
 - minimum height 56 px;
 - Send target 48×48 px;
 - text grows 1–5 lines;
-- placeholder `メッセージを入力`.
+- placeholder `Message...`.
 
 Do not add by default:
 - microphone;

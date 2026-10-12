@@ -121,7 +121,7 @@ Conversation remains visually connected to Alice.
 Dark rounded input with blue focus treatment and circular send action.
 
 Phase 1:
-- placeholder `メッセージを入力`;
+- placeholder `Message...`;
 - no microphone;
 - no attachment;
 - no tool selector;

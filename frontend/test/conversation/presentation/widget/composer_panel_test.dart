@@ -102,6 +102,33 @@ void main() {
     expect(size.height, lessThanOrEqualTo(136.0));
   });
 
+  testWidgets(
+    'five-line draft with validation stays within bounds',
+    (tester) async {
+      final controller = TextEditingController(
+        text: 'line1\\nline2\\nline3\\nline4\\nline5',
+      );
+      final focusNode = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(focusNode.dispose);
+
+      await tester.pumpWidget(
+        buildTestable(
+          controller: controller,
+          focusNode: focusNode,
+          onSend: () {},
+          validationMessage: '10,000文字以内で入力してください',
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.getSize(find.byType(ComposerPanel)).height,
+        lessThanOrEqualTo(136.0),
+      );
+    },
+  );
+
   testWidgets('shows the Validation Message slot only when provided', (
     tester,
   ) async {

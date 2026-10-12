@@ -579,7 +579,7 @@ Phase 1のComposerは、Message入力欄と送信Buttonだけで構成する。A
 
 | Item | Decision |
 |---|---|
-| Placeholder | `メッセージを入力` |
+| Placeholder | `Message...` |
 | Minimum | 空白以外を1 Unicode Code Point以上含む |
 | Maximum | 10,000 Unicode Code Point |
 | Newline | Return Keyは改行として扱う |
@@ -1493,7 +1493,7 @@ Roleは位置、SurfaceおよびAccessibility Labelの組合せで識別する�
 ### 17.10 Composer and Actions
 
 - ComposerはDark Surface上のRounded Inputと円形Send Buttonで構成する
-- Placeholderは`メッセージを入力`とする
+- Placeholderは`Message...`とする
 - Input Borderは`border`、Focus時は`primary`を使用する
 - Input Corner Radiusは14〜18とする
 - Send Buttonは44 x 44 pt以上、Enabled時`primary`、Iconは`textPrimary`とする
@@ -1870,7 +1870,7 @@ Domain EntityまたはAPI DTOへ上記UI Stateを追加しない。Presentation 
 `ComposerPanel`はBottom Safe Area直上へ配置し、Keyboardへ追従する。
 
 - `MessageTextField`は1〜5行
-- Placeholderは`メッセージを入力`
+- Placeholderは`Message...`
 - `SendButton`は44 x 44 logical pixels以上の円形Button
 - Send Iconは上向きArrow
 - `ComposerValidationMessage`はInputとの関係が分かる位置へ表示する

@@ -73,7 +73,7 @@ Placed at bottom of right Conversation region.
 Default Phase 1:
 - text field;
 - Send only;
-- placeholder `メッセージを入力`;
+- placeholder `Message...`;
 - 1–5 lines;
 - no microphone;
 - no attachment;

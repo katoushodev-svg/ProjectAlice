@@ -11,7 +11,7 @@ import '../widget/message_viewport.dart';
 ///
 /// FIP-007 does not connect this to Application State, HTTP or SSE. All
 /// Controllers are owned by the caller and passed in.
-class ConversationScreenShell extends StatelessWidget {
+class ConversationScreenShell extends StatefulWidget {
   const ConversationScreenShell({
     super.key,
     required this.coreVisualState,
@@ -32,6 +32,19 @@ class ConversationScreenShell extends StatelessWidget {
     this.showCharacterCount = false,
   });
 
+  /// At this width, the conversation switches to the desktop layout.
+  static const double desktopBreakpoint = 900;
+
+  /// Initial width ratio of the Alice Core pane.
+  static const double initialLeftPaneFraction = 0.55;
+
+  /// Minimum and maximum width ratios of the Alice Core pane.
+  static const double minLeftPaneFraction = 0.35;
+  static const double maxLeftPaneFraction = 0.70;
+
+  /// Width reserved for the draggable divider.
+  static const double dividerHitAreaWidth = 7;
+
   final AliceCoreVisualState coreVisualState;
   final List<Widget> messageItems;
   final TextEditingController draftController;
@@ -50,9 +63,148 @@ class ConversationScreenShell extends StatelessWidget {
   final bool showCharacterCount;
 
   @override
+  State<ConversationScreenShell> createState() =>
+      _ConversationScreenShellState();
+}
+
+class _ConversationScreenShellState extends State<ConversationScreenShell> {
+  double _leftPaneFraction = ConversationScreenShell.initialLeftPaneFraction;
+
+  Widget _buildComposer() {
+    return ComposerPanel(
+      draftController: widget.draftController,
+      focusNode: widget.focusNode,
+      enabled: widget.composerEnabled,
+      sendEnabled: widget.sendEnabled,
+      validationMessage: widget.validationMessage,
+      onDraftChanged: widget.onDraftChanged,
+      characterCount: widget.characterCount,
+      showCharacterCount: widget.showCharacterCount,
+      onSend: widget.onSend,
+    );
+  }
+
+  Widget _buildConversationBody({
+    required bool keyboardVisible,
+    required bool showCore,
+  }) {
+    return _ConversationBody(
+      coreVisualState: widget.coreVisualState,
+      messageItems: widget.messageItems,
+      scrollController: widget.scrollController,
+      keyboardVisible: keyboardVisible,
+      onScrollNotification: widget.onScrollNotification,
+      messageViewportKey: widget.messageViewportKey,
+      showLatestButton: widget.showLatestButton,
+      onLatestTap: widget.onLatestTap,
+      showCore: showCore,
+    );
+  }
+
+  void _resizeLeftPane({
+    required double delta,
+    required double availableWidth,
+  }) {
+    if (availableWidth <= 0) {
+      return;
+    }
+
+    setState(() {
+      _leftPaneFraction = (_leftPaneFraction + delta / availableWidth)
+          .clamp(
+            ConversationScreenShell.minLeftPaneFraction,
+            ConversationScreenShell.maxLeftPaneFraction,
+          )
+          .toDouble();
+    });
+  }
+
+  Widget _buildDesktopLayout({
+    required double width,
+    required bool keyboardVisible,
+  }) {
+    const dividerWidth = ConversationScreenShell.dividerHitAreaWidth;
+
+    final availableWidth = width - dividerWidth;
+
+    final leftWidth = (availableWidth * _leftPaneFraction)
+        .clamp(
+          availableWidth * ConversationScreenShell.minLeftPaneFraction,
+          availableWidth * ConversationScreenShell.maxLeftPaneFraction,
+        )
+        .toDouble();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: leftWidth,
+          child: LayoutBuilder(
+            builder: (context, paneConstraints) {
+              final coreSize =
+                  (paneConstraints.maxWidth < paneConstraints.maxHeight
+                      ? paneConstraints.maxWidth
+                      : paneConstraints.maxHeight) *
+                  0.82;
+
+              return Center(
+                child: AliceCoreRegion(
+                  visualState: widget.coreVisualState,
+                  height: coreSize,
+                ),
+              );
+            },
+          ),
+        ),
+
+        // A wider hit area makes the divider easier to grab.
+        SizedBox(
+          width: dividerWidth,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeLeftRight,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (details) {
+                _resizeLeftPane(
+                  delta: details.delta.dx,
+                  availableWidth: availableWidth,
+                );
+              },
+              child: Center(
+                child: Container(
+                  width: 1,
+                  height: double.infinity,
+                  color: Theme.of(context).dividerColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        Expanded(
+          child: Column(
+            children: [
+              Expanded(
+                child: _buildConversationBody(
+                  keyboardVisible: keyboardVisible,
+                  showCore: false,
+                ),
+              ),
+
+              // Keep the compact Composer and bottom spacing.
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SizedBox(height: 68, child: _buildComposer()),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Read Keyboard Insets before Scaffold's resizeToAvoidBottomInset
-    // consumes/zeroes viewInsets for its body's descendants.
     final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return Scaffold(
@@ -62,27 +214,30 @@ class ConversationScreenShell extends StatelessWidget {
           children: [
             const AliceHeader(),
             Expanded(
-              child: _ConversationBody(
-                coreVisualState: coreVisualState,
-                messageItems: messageItems,
-                scrollController: scrollController,
-                keyboardVisible: keyboardVisible,
-                onScrollNotification: onScrollNotification,
-                messageViewportKey: messageViewportKey,
-                showLatestButton: showLatestButton,
-                onLatestTap: onLatestTap,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth <
+                      ConversationScreenShell.desktopBreakpoint) {
+                    // Preserve the existing mobile/tablet layout.
+                    return Column(
+                      children: [
+                        Expanded(
+                          child: _buildConversationBody(
+                            keyboardVisible: keyboardVisible,
+                            showCore: true,
+                          ),
+                        ),
+                        _buildComposer(),
+                      ],
+                    );
+                  }
+
+                  return _buildDesktopLayout(
+                    width: constraints.maxWidth,
+                    keyboardVisible: keyboardVisible,
+                  );
+                },
               ),
-            ),
-            ComposerPanel(
-              draftController: draftController,
-              focusNode: focusNode,
-              enabled: composerEnabled,
-              sendEnabled: sendEnabled,
-              validationMessage: validationMessage,
-              onDraftChanged: onDraftChanged,
-              characterCount: characterCount,
-              showCharacterCount: showCharacterCount,
-              onSend: onSend,
             ),
           ],
         ),
@@ -91,8 +246,10 @@ class ConversationScreenShell extends StatelessWidget {
   }
 }
 
-/// Splits available Body height between the non-scrolling Alice Core Region
-/// and the single scrollable Message Viewport (FIP-007 Section 12).
+/// Splits available body height between Alice Core and the message viewport.
+///
+/// On desktop, [showCore] is false because Alice Core is rendered in the
+/// separate left pane.
 class _ConversationBody extends StatelessWidget {
   const _ConversationBody({
     required this.coreVisualState,
@@ -103,6 +260,7 @@ class _ConversationBody extends StatelessWidget {
     required this.messageViewportKey,
     required this.showLatestButton,
     required this.onLatestTap,
+    required this.showCore,
   });
 
   final AliceCoreVisualState coreVisualState;
@@ -113,36 +271,42 @@ class _ConversationBody extends StatelessWidget {
   final GlobalKey? messageViewportKey;
   final bool showLatestButton;
   final VoidCallback? onLatestTap;
+  final bool showCore;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final bodyHeight = constraints.maxHeight;
+
         final coreHeight = ConversationLayoutMetrics.coreHeight(
           bodyHeight,
           keyboardVisible: keyboardVisible,
         );
-        final coreVisible = ConversationLayoutMetrics.isCoreVisible(
-          bodyHeight: bodyHeight,
-          keyboardVisible: keyboardVisible,
-        );
+
+        final coreVisible =
+            showCore &&
+            ConversationLayoutMetrics.isCoreVisible(
+              bodyHeight: bodyHeight,
+              keyboardVisible: keyboardVisible,
+            );
 
         return Stack(
           children: [
             Column(
               children: [
-                AnimatedContainer(
-                  duration: ConversationLayoutMetrics.coreTransitionDuration,
-                  curve: Curves.easeInOut,
-                  height: coreVisible ? coreHeight : 0,
-                  child: coreVisible
-                      ? AliceCoreRegion(
-                          visualState: coreVisualState,
-                          height: coreHeight,
-                        )
-                      : null,
-                ),
+                if (showCore)
+                  AnimatedContainer(
+                    duration: ConversationLayoutMetrics.coreTransitionDuration,
+                    curve: Curves.easeInOut,
+                    height: coreVisible ? coreHeight : 0,
+                    child: coreVisible
+                        ? AliceCoreRegion(
+                            visualState: coreVisualState,
+                            height: coreHeight,
+                          )
+                        : null,
+                  ),
                 Expanded(
                   child: NotificationListener<ScrollNotification>(
                     onNotification: onScrollNotification,

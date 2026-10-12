@@ -50,25 +50,23 @@ class ComposerPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Flexible(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: MessageTextField(
-                        controller: draftController,
-                        focusNode: focusNode,
-                        enabled: enabled,
-                        onChanged: onDraftChanged,
-                      ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: MessageTextField(
+                      controller: draftController,
+                      focusNode: focusNode,
+                      enabled: enabled,
+                      onChanged: onDraftChanged,
                     ),
-                    const SizedBox(width: 8.0),
-                    SendButton(
-                      enabled: enabled && sendEnabled,
-                      onPressed: onSend,
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8.0),
+                  SendButton(
+                    enabled: enabled && sendEnabled,
+                    onPressed: onSend,
+                  ),
+                ],
               ),
               if (validationMessage != null || showCharacterCount)
                 Padding(
