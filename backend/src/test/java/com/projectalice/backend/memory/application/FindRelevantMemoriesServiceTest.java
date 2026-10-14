@@ -250,7 +250,7 @@ class FindRelevantMemoriesServiceTest {
     }
 
     @Test
-    void limitsCandidatePoolBeforeHydration() {
+    void doesNotSelectFirstFortyBeforeRankingIsAvailable() {
         List<MemorySearchCandidate> candidates = new ArrayList<>();
         for (int i = 0; i < 41; i++) {
             PersonalMemory memory = repository.add(memory("Memory " + i, MemoryCategory.PROJECT));
@@ -260,12 +260,12 @@ class FindRelevantMemoriesServiceTest {
 
         FindRelevantMemoriesResult result = service.execute(query(MemoryRetrievalPurpose.ANSWER_CURRENT, "x"));
 
-        assertEquals(MemoryContextBudget.DEFAULT_MAX_CANDIDATE_ITEMS, repository.requestedIds.size());
-        assertEquals(candidates.subList(0, MemoryContextBudget.DEFAULT_MAX_CANDIDATE_ITEMS).stream()
-                        .map(MemorySearchCandidate::memoryId).toList(),
-                repository.requestedIds);
         assertEquals(SearchCompleteness.COMPLETE, result.searchCompleteness());
-        assertEquals(FindRelevantMemoriesResult.HydrationStatus.PARTIAL, result.hydrationStatus());
+        assertEquals(FindRelevantMemoriesResult.HydrationStatus.NOT_ATTEMPTED, result.hydrationStatus());
+        assertTrue(result.items().isEmpty());
+        assertEquals("", result.payload());
+        assertTrue(repository.requestedIds.isEmpty());
+        assertEquals(FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED, result.estimationStatus());
     }
 
     @Test

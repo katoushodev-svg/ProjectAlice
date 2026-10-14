@@ -10,7 +10,8 @@ public record FindRelevantMemoriesResult(
         List<MemoryContextItem> items,
         String payload,
         EstimationStatus estimationStatus,
-        OptionalLong estimatedTokenCount) {
+        OptionalLong estimatedTokenCount,
+        java.util.Optional<MemorySelectionReference> selectionReference) {
 
     public enum HydrationStatus {
         COMPLETE,
@@ -31,6 +32,7 @@ public record FindRelevantMemoriesResult(
         Objects.requireNonNull(payload, "payload must not be null");
         Objects.requireNonNull(estimationStatus, "estimationStatus must not be null");
         Objects.requireNonNull(estimatedTokenCount, "estimatedTokenCount must not be null");
+        selectionReference = selectionReference == null ? java.util.Optional.empty() : selectionReference;
         if ((estimationStatus == EstimationStatus.ESTIMATED) != estimatedTokenCount.isPresent()) {
             throw new IllegalArgumentException("estimatedTokenCount must match estimationStatus");
         }
@@ -40,6 +42,13 @@ public record FindRelevantMemoriesResult(
         }
     }
 
+    public FindRelevantMemoriesResult(SearchCompleteness searchCompleteness, HydrationStatus hydrationStatus,
+            List<MemoryContextItem> items, String payload, EstimationStatus estimationStatus,
+            OptionalLong estimatedTokenCount) {
+        this(searchCompleteness, hydrationStatus, items, payload, estimationStatus, estimatedTokenCount,
+                java.util.Optional.empty());
+    }
+
     public static FindRelevantMemoriesResult unavailable() {
         return new FindRelevantMemoriesResult(
                 SearchCompleteness.UNAVAILABLE,
@@ -47,6 +56,7 @@ public record FindRelevantMemoriesResult(
                 List.of(),
                 "",
                 EstimationStatus.NOT_ATTEMPTED,
-                OptionalLong.empty());
+                OptionalLong.empty(),
+                java.util.Optional.empty());
     }
 }

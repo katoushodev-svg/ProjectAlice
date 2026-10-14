@@ -3,6 +3,7 @@ package com.projectalice.backend.memory.application;
 import com.projectalice.backend.memory.application.port.TokenEstimator;
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.port.out.PersonalMemoryRepository;
+import com.projectalice.backend.memory.application.port.out.MemoryResetPointRepository;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -27,6 +28,7 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
     private final MemoryDiversityPolicy diversityPolicy;
     private final TokenEstimator tokenEstimator;
     private final MemoryContextPayloadSerializer payloadSerializer;
+    private final MemoryResetPointRepository resetPointRepository;
 
     public FindRelevantMemoriesService(
             AnswerMemorySearchPort searchPort,
@@ -36,7 +38,7 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
         this(searchPort, personalMemoryRepository,
                 MemoryRelevanceRankingPolicy.preservingInputOrder(),
                 MemoryDeduplicationPolicy.preservingCandidates(),
-                MemoryDiversityPolicy.preservingCandidates(), tokenEstimator, payloadSerializer);
+                MemoryDiversityPolicy.preservingCandidates(), tokenEstimator, payloadSerializer, null);
     }
 
     public FindRelevantMemoriesService(
@@ -47,7 +49,7 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             MemoryContextPayloadSerializer payloadSerializer) {
         this(searchPort, personalMemoryRepository, rankingPolicy,
                 MemoryDeduplicationPolicy.preservingCandidates(),
-                MemoryDiversityPolicy.preservingCandidates(), tokenEstimator, payloadSerializer);
+                MemoryDiversityPolicy.preservingCandidates(), tokenEstimator, payloadSerializer, null);
     }
 
     public FindRelevantMemoriesService(
@@ -58,6 +60,19 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
             MemoryDiversityPolicy diversityPolicy,
             TokenEstimator tokenEstimator,
             MemoryContextPayloadSerializer payloadSerializer) {
+        this(searchPort, personalMemoryRepository, rankingPolicy, deduplicationPolicy, diversityPolicy,
+                tokenEstimator, payloadSerializer, null);
+    }
+
+    public FindRelevantMemoriesService(
+            AnswerMemorySearchPort searchPort,
+            PersonalMemoryRepository personalMemoryRepository,
+            MemoryRelevanceRankingPolicy rankingPolicy,
+            MemoryDeduplicationPolicy deduplicationPolicy,
+            MemoryDiversityPolicy diversityPolicy,
+            TokenEstimator tokenEstimator,
+            MemoryContextPayloadSerializer payloadSerializer,
+            MemoryResetPointRepository resetPointRepository) {
         this.rankingPolicy = Objects.requireNonNull(rankingPolicy, "rankingPolicy must not be null");
         this.deduplicationPolicy =
                 Objects.requireNonNull(deduplicationPolicy, "deduplicationPolicy must not be null");
@@ -67,6 +82,7 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 personalMemoryRepository, "personalMemoryRepository must not be null");
         this.tokenEstimator = Objects.requireNonNull(tokenEstimator, "tokenEstimator must not be null");
         this.payloadSerializer = Objects.requireNonNull(payloadSerializer, "payloadSerializer must not be null");
+        this.resetPointRepository = resetPointRepository;
     }
 
     @Override
@@ -77,6 +93,12 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
         if (purpose != MemoryRetrievalPurpose.ANSWER_CURRENT
                 && purpose != MemoryRetrievalPurpose.ANSWER_HISTORICAL) {
             throw new IllegalArgumentException("unsupported purpose: " + purpose);
+        }
+
+        long selectedResetGeneration = -1;
+        if (resetPointRepository != null) {
+            try { selectedResetGeneration = resetPointRepository.currentGeneration(); }
+            catch (RuntimeException unavailable) { return FindRelevantMemoriesResult.unavailable(); }
         }
 
         AnswerMemorySearchResult searchResult;
@@ -90,11 +112,22 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
         }
         List<MemorySearchCandidate> candidates = searchResult.candidates();
 
-        int candidateLimit = Math.min(candidates.size(), query.contextBudget().maxCandidateItems());
+        if (candidates.size() > query.contextBudget().maxCandidateItems()) {
+            // The 40-item Application Pool must be selected after authoritative hydration and
+            // relevance ranking. Until the accepted ranking parameters are implemented, do not
+            // silently turn the adapter's list order into a selected prefix.
+            return new FindRelevantMemoriesResult(
+                    searchResult.completeness(),
+                    FindRelevantMemoriesResult.HydrationStatus.NOT_ATTEMPTED,
+                    List.of(),
+                    "",
+                    FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED,
+                    OptionalLong.empty());
+        }
+
+        int candidateLimit = candidates.size();
         List<MemoryRankingCandidate> eligible = new ArrayList<>();
-        // Search completeness describes candidate generation; the Application cap only
-        // makes this stage's hydration incomplete and must remain separately observable.
-        boolean partial = candidates.size() > candidateLimit;
+        boolean partial = false;
         for (int i = 0; i < candidateLimit; i++) {
             MemorySearchCandidate candidate = candidates.get(i);
             if (candidate == null) {
@@ -135,7 +168,11 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 searchResult.completeness(),
                 partial ? FindRelevantMemoriesResult.HydrationStatus.PARTIAL
                         : FindRelevantMemoriesResult.HydrationStatus.COMPLETE,
-                selection.items(), selection.payload(), selection.estimationStatus(), selection.estimatedTokenCount());
+                selection.items(), selection.payload(), selection.estimationStatus(), selection.estimatedTokenCount(),
+                resetPointRepository == null || selection.items().isEmpty()
+                        ? Optional.empty()
+                        : Optional.of(MemorySelectionReference.capture(
+                                selectedResetGeneration, searchResult.completeness(), selection.items())));
     }
 
     private Selection applyContextBudget(

@@ -5,6 +5,7 @@ import com.projectalice.backend.memory.application.port.out.PersonalMemoryReposi
 import com.projectalice.backend.memory.domain.MemoryId;
 import com.projectalice.backend.memory.domain.PersonalMemory;
 import java.time.OffsetDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -50,10 +51,13 @@ public final class DynamoDbPersonalMemoryRepository implements PersonalMemoryRep
                 .conditionExpression("attribute_not_exists(pk) AND attribute_not_exists(sk)")
                 .build();
 
+        Put intentPut = projectionIntent(memory, Instant.now().toEpochMilli());
+
         dynamoDbClient.transactWriteItems(TransactWriteItemsRequest.builder()
                 .transactItems(List.of(
                         TransactWriteItem.builder().put(memoryPut).build(),
-                        TransactWriteItem.builder().put(revisionPut).build()))
+                        TransactWriteItem.builder().put(revisionPut).build(),
+                        TransactWriteItem.builder().put(intentPut).build()))
                 .build());
     }
 
@@ -145,11 +149,14 @@ public final class DynamoDbPersonalMemoryRepository implements PersonalMemoryRep
                 .conditionExpression("attribute_not_exists(pk) AND attribute_not_exists(sk)")
                 .build();
 
+        Put intentPut = projectionIntent(afterPersisted, Instant.now().toEpochMilli());
+
         try {
             dynamoDbClient.transactWriteItems(TransactWriteItemsRequest.builder()
                     .transactItems(List.of(
                             TransactWriteItem.builder().update(memoryUpdate).build(),
-                            TransactWriteItem.builder().put(revisionPut).build()))
+                            TransactWriteItem.builder().put(revisionPut).build(),
+                            TransactWriteItem.builder().put(intentPut).build()))
                     .build());
         } catch (TransactionCanceledException exception) {
             throw new MemoryUpdateConflictException(
@@ -163,6 +170,25 @@ public final class DynamoDbPersonalMemoryRepository implements PersonalMemoryRep
         return Map.of(
                 "pk", AttributeValue.builder().s("MEMORY#" + memoryId.value()).build(),
                 "sk", AttributeValue.builder().s("META").build());
+    }
+
+    private Put projectionIntent(PersonalMemory memory, long nowEpochMillis) {
+        String intentId = java.util.UUID.randomUUID().toString();
+        String createdAt = OffsetDateTime.now().toString();
+        Map<String, AttributeValue> item = new HashMap<>();
+        item.put("pk", AttributeValue.builder().s("MEMORY_SEARCH#PENDING").build());
+        item.put("sk", AttributeValue.builder().s("AVAILABLE#%013d#%013d#%s#%020d"
+                .formatted(nowEpochMillis, nowEpochMillis, memory.memoryId().value(), memory.version())).build());
+        item.put("itemType", AttributeValue.builder().s("MEMORY_SEARCH_INTENT").build());
+        item.put("operation", AttributeValue.builder().s("UPSERT").build());
+        item.put("intentId", AttributeValue.builder().s(intentId).build());
+        item.put("memoryId", AttributeValue.builder().s(memory.memoryId().value()).build());
+        item.put("targetVersion", AttributeValue.builder().n(Long.toString(memory.version())).build());
+        item.put("createdAt", AttributeValue.builder().s(createdAt).build());
+        item.put("attemptCount", AttributeValue.builder().n("0").build());
+        item.put("nextAttemptAt", AttributeValue.builder().n(Long.toString(nowEpochMillis)).build());
+        return Put.builder().tableName(tableName).item(Map.copyOf(item))
+                .conditionExpression("attribute_not_exists(pk) AND attribute_not_exists(sk)").build();
     }
 
     private static List<String> changedFields(PersonalMemory before, PersonalMemory after) {

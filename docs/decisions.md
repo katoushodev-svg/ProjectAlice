@@ -1322,3 +1322,111 @@ Related Documents
 Result
 
 Answer Searchの重み付き順位方式、Application所有の200件から40件へのCandidate Pool選択、および既存Search Completeness / Eval契約との関係をAcceptedとする。具体的な重み、尺度、欠損集約規則、閾値および同点処理は未決定のままとし、DB2-065評価に基づく後続Decisionを必要とする。本ADRではSource Code、Test、Dependency、Database SchemaまたはDB2 Decisionを変更しない。
+
+⸻
+
+ADR-019 Projection Page Integrity Digest and Activation Verification
+
+Status
+
+Accepted
+
+⸻
+
+Context
+
+統合Database設計§36.5はProjection Metadataへ`projectionDigest`を置くが、その算出対象と検証条件は定義していなかった。Term PageはMemory本文やNormalized Termを含まず、各DescriptorのTerm Digest、Term KindおよびWeight Codeだけを保持する（DB2-050）。Projection Workerは複数Write後にActive Semantic Versionを切り替える（DB2-053）。このため、永続化したVersioned Term Page全体の構造と値をActivation前に照合する決定的なIntegrity Contractが必要である。
+
+Decision
+
+1. `projectionDigest`は一つのMemory ID・Semantic Version・Analyzer Version・Term Key Versionに属する全Term Pageの永続化後Integrity Verificationに使用する。Canonical InputにはMemory ID、Semantic Version、Analyzer Version、Term `tokenKeyVersion`、Page数、Page Number、各PageのDescriptor数、およびDescriptorの`termDigest`、`termKind`、`weightCode`を含める。本文、Normalized Term、Key Material、`projectionDigestKeyVersion`、`fallbackRequired`、StatusおよびTimestampは含めない。Term Key VersionはPage Descriptor群のDigest Versionを束縛する。MetadataのFallback / Count / Status値は別の構造検証で照合する。
+2. Canonical Byte Format Version 1は次の規則に固定する。
+   - Headerは4 Byte ASCII `APDG`とU16 Big-endian Version `0x0001`。
+   - 全Fieldは`Tag:u8 || Length:u32be || Value`とする。LengthはValueのByte数で、Headerを含まない。固定幅整数FieldにもField Headerを付け、Lengthは定義幅と一致させる。整数は符号なしBig-endianとする。
+   - Top-level Fieldは順に`0x01 memoryId`（Canonical lowercase UUID v4 ASCII / UTF-8 36 Byte）、`0x02 semanticVersion`（正数Java `long`、U64 / 8 Byte）、`0x03 analyzerVersion`（空でない厳密UTF-8、正規化なし）、`0x04 tokenKeyVersion`（正数Java `int`、U32 / 4 Byte）、`0x05 pageCount`（U32 / 4 Byte）、Page Record `0x10`をPage数分とする。
+   - Page RecordのValueは`0x11 pageNumber`（U32 / 4 Byte）、`0x12 descriptorCount`（U32 / 4 Byte）、Descriptor Record `0x20`をDescriptor数分の順に持つ。Page Numberは0始まり連番で昇順。Descriptorの保存順序を維持する。Page RecordのLengthはこのNested Field列全体のByte数。
+   - Descriptor RecordのValueは順に`0x21 termDigest`（43 ASCII / UTF-8 Byte、unpadded Base64url SHA-256）、`0x22 termKind`（U8 / 1 Byte。Canonical識別子を`LEXICAL=1`、`NGRAM_3=2`、`NGRAM_2=3`、`NGRAM_1=4`に固定し、Java Enum ordinal/nameおよびDynamoDB保存文字列から導出しない）、`0x23 weightCode`（正数U32 / 4 Byte）のNested Field列。Descriptor RecordのLengthはNested Field列全体のByte数。KW_V1の既存Weight Code対応は`LEXICAL=4`、`NGRAM_3=3`、`NGRAM_2=2`、`NGRAM_1=1`であり、Canonical Encoderは不一致を拒否する。
+   - 各Field LengthはValueのByte数を数え、可変長文字列は文字数ではなくUTF-8 Byte数を使う。ページ数は0〜6、各Page Descriptor数は1〜100、総Descriptor数は最大512。0件はPage数0かつPage Recordなしで表す。
+   - Unknown Tag、順序違反、重複／欠落Field、Length不一致、切詰め／余剰Byte、Malformed UTF-8、Memory ID不正、Semantic Version / Key Versionの非正数、Page Numberの欠番・重複・順序違反、Descriptor属性不正、Term Kind / Weight Code不一致、Term / Page / Metadata Version不一致、Page / Descriptor Count不一致を拒否する。Canonical EncoderはMap iteration順やLocaleに依存せず、既定の固定順だけを出力する。
+3. Purpose Codeは`MEMORY_PROJECTION_DIGEST`とし、別PurposeのKey Materialを割り当てる。HMAC Messageは`UTF8("alice-memory-projection-digest\0") || CanonicalBytesV1`、AlgorithmはHMAC-SHA-256、出力は32 Byte全体をBase64url without paddingとする。検証は文字列表現・復号後長を検査した後、復号32 Byteをconstant-time比較する。`MEMORY_SEARCH_TERM`のPurpose Domain / Keyは流用しない。Key MaterialはInfrastructure内に置く。
+4. Projection Digest Key VersionはTerm Key Versionと独立に採番し、MetadataへNumber属性`projectionDigestKeyVersion`として保存する。書込DigestとそのWrite Versionを不可分に扱い、検証時はMetadataの当該VersionでKeyを選択する。Canonical BytesにはProjection Digest Key Versionを含めない。Version付きPhase 2 Keyの最大2 Read / 1 Active Write、Startup Capability ProbeおよびRetirement条件を本Purposeにも個別適用する（Security設計§37.2–37.4）。このCapabilityがUnavailableの場合、新ProjectionのDigest検証・Activationを停止し、既存Verified Active Versionを変更しない。
+5. `projectionDigestKeyVersion`のないLegacy Metadataは未検証とし、`tokenKeyVersion`からProjection Digest Key Versionを推定しない。Legacy PageだけからDigestを作り直して正当性を主張しない。Authoritative Memory / RevisionからProjectionを再構築し、新Pageの永続化後検証に成功するまでReady候補にしない。Readiness failureはDB2-055 / 057および§36.9のPurpose別動作を適用する。
+6. Workerは全Page Write成功後、PageをStrongly Consistent Readで再読込し、保存属性・連番・順序・Countを検証する。Read-back値からVersion 1 Canonical Bytesを再生成し、同じAttemptで事前計算したExpected Digestを同じProjection Digest Key Versionで再計算してconstant-time比較する。Read-back、構造検証または比較に失敗した場合、Active Metadataを更新せずTarget Intentを完了扱いにしない。Staged DigestをMetadataへ先行保存しない。Worker再起動時はAuthoritative SourceからExpected Projectionを再生成して再試行する。
+7. Digest照合はActivation前提条件の一つであり、単独ではActivationを許可しない。Posting / Page全Write成功、Fallback状態およびIntent / Version条件等の既存Worker完了条件をすべて満たした後、最終TransactionでMetadataのActive Version、Projection Digest、Projection Digest Key VersionおよびCountsを更新し、Claim済みIntentを削除する。このTransaction境界はDB2-053を維持し、Create / Semantic UpdateのAuthoritative Mutation Transactionを変更しない。
+8. `projectionDigest`はActivation時点でRead-backしたProjection Pageの整合性を証明する。各Search Requestで全Pageを再検証する契約ではなく、Activation後の保存破損を検出する頻度・Repair Triggerは既存Repair設計の範囲で扱い、Digestだけで将来時点の不変性を保証しない。
+
+Alternatives Considered
+
+`tokenKeyVersion`をProjection Digest Key Versionとして流用する
+
+Metadata属性は増えないが、Term Search PurposeとProjection Integrity PurposeのKey Lifecycleを結合し、Key Purpose Separationを壊すため採用しない。
+
+JSON / Map反復順で直列化する
+
+実装は簡単だが、Property順、Number表現、Escape表現またはMap iterationによりByte列が変わり得るため、Canonical Formatとして採用しない。
+
+MetadataへStaged Digestを先行保存する
+
+Activation前の比較値を永続化できるが、現行MetadataにStaged Stateや同時Mutation時の遷移がない。追加Stateを必要とするため採用しない。同一Worker Attempt内のExpected Digestと、永続化後Read-back値を比較し、DigestとVersionを最終Activation Transactionで保存する。
+
+Legacy MetadataのKey Versionに`tokenKeyVersion`を使用する
+
+過去にどのPurpose Keyで生成されたかの根拠がなく、誤ったKeyで検証成功と誤認する危険があるため採用しない。Legacy ProjectionはAuthoritative Sourceから再構築する。
+
+Consequences
+
+Positive
+
+- Projection Integrity KeyとTerm Search KeyのPurpose / Rotation Boundaryを分けられる。
+- 永続化後に再読込したPageだけをActivation前の比較対象にし、未検証StageをReadyとして公開しない。
+- Canonical FormatがByte単位で再現可能となり、Key Rotation時の再計算にも使える。
+
+Negative
+
+- Metadataに`projectionDigestKeyVersion`が追加され、Legacy Projectionは再構築が必要となる。
+- Strong Read-back、Canonical Encoding、Digest CapabilityおよびMigration / Rotationの実装が追加される。
+- DigestはActivation時点の検証であり、その後の保存破損検出には別のRepair / Verification Triggerが必要となる。
+
+Review and Follow-up Trace
+
+- DB2-049の`MEMORY_SEARCH_TERM` Purpose、Term Key VersionおよびRotationを維持し、新PurposeとKey Materialを分離する。
+- DB2-050のContent-free Projection / Term Page契約を維持する。
+- DB2-052のMutation Intentを含むAuthoritative Transactionを変更しない。
+- DB2-053の段階Write後だけActive Semantic Versionを切り替える契約へ、Digest Read-back検証を追加する。Activation Metadata更新とIntent削除のAtomic Transactionを維持する。
+- Security設計§37.1–37.4のPurpose Separation、Capability Gate、Phase 2 Key Rotation / Retirementを適用する。
+- `memory-design.md` §14.5はProjection Digest責務とKey Boundaryを参照する。
+
+Related Documents
+
+- `integrated/database-design.md` §36.4–§36.9、DB2-049、DB2-050、DB2-052、DB2-053
+- `phases/security-design.md` §37.1–§37.4
+- `memory-design.md` §14.5、§14.18
+
+Result
+
+Projection Page Integrity DigestのCanonical Byte Format Version 1、専用Purpose Key、Version付きMetadata、Legacy HandlingおよびActivation前Read-back検証をAcceptedとする。Worker / Key Provider / Capability Gate / Metadata Mapper / TransactionのJava実装は本Decisionでは変更しない。
+
+---
+
+ADR-020 Projection Intent Claim Lease and Fencing
+
+Status
+
+Accepted
+
+Context
+
+DB2-052 / DB2-053およびADR-019はIntentのRetryとClaim済みIntentのActivation削除を要求するが、Claim所有権、Takeoverおよび古いWorkerのFence属性を定義していなかった。DynamoDBはPrimary KeyをUpdateできず、Claim状態をAVAILABLE Key上の属性だけで表すと、期限切れClaimのKey Condition Queryと通常Claimの排他取得を同じ契約で実現できない。
+
+Decision
+
+1. Claim OwnerはWorker実行単位のCanonical UUID v4文字列`claimOwnerId`とする。IntentへNumber属性`claimEpoch`（正数Java long）およびNumber属性`leaseExpiresAtEpochMillis`を保存する。Claim Leaseは300秒とし、Renewalは現在Owner / Epoch / 未期限切れLeaseを条件に更新し、新期限は現在時刻から300秒とする。
+2. 通常取得は期限到来したAVAILABLE IntentをPK/SKでQuery後、同じTransaction内の旧Key Deleteと新`CLAIMED#<13-digit leaseExpiresAtEpochMillis>#<13-digit createdEpochMillis>#<memoryId>#<20-digit targetVersion>` KeyへのPutで行う。Deleteは旧Keyと`intentId` / `attemptCount`を条件確認し、Putは新Key不存在を条件とする。epochは前値+1とし、long overflowは取得拒否とする。Queryは候補列挙に限り、Transaction ConditionがClaimの競合判定を行う。
+3. Takeoverは期限切れCLAIMED KeyをKey Conditionで列挙し、現在のOwner / Epoch / 期限値を照合して同じDelete+Put TransactionでOwnerを差し替え、Epochを1増加させる。Lease期限の到達だけでIntentを削除しない。Worker停止後はLease期限到達後に限り再取得する。
+4. ClaimはRenewal Transactionが成功しない時点で失効する。すべてのClaim依存WriteおよびActivationはOwner、Epoch、Lease期限をConditionで検査し、古いWorkerは継続処理できてもActivationできない。Lease期限判定にはUTC Epoch Millisを使う。
+5. Retry延期はOwner / Epoch / 未期限切れLeaseを条件に、Claimed Intent Deleteと同じ`intentId` / `claimEpoch`を保持するAVAILABLE KeyへのPutを一Transactionで行う。`attemptCount`を1増加させ、`nextAttemptAt`とSort Keyを一致させる。Retry後の新ClaimでEpochをさらに1増加させる。
+6. Activation最終TransactionはProjection Metadata UpdateとClaimed Intent Deleteを含み、Intent Delete Conditionで`intentId`、`claimOwnerId`、`claimEpoch`、`leaseExpiresAtEpochMillis > now`およびClaimed Keyを照合する。Metadata UpdateにもTarget Version条件を置く。Transaction失敗時はActive MetadataとIntentの双方を変更しない。
+7. 同一Intentの派生Page / Posting Writeは冪等な同一Key Putとする。既存Keyの再実行は保存値を再検証し、異なる内容を成功扱いにしない。Epoch一致はActivation fencingの根拠であり、Derived Writeの前提条件を代替しない。
+8. Lease 300秒は既存Database設計のShort Operation Processing Lease上限/default（最大5分）に合わせる。これはIntentのSLAではなくTakeover前の所有期間であり、Workerは処理継続中にRenewする。
+
+---
