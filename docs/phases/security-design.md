@@ -1314,6 +1314,7 @@ Usage Trace保存失敗だけで正常回答を失敗へ変えないが、`NOT_R
 | `CONVERSATION_CURSOR_SIGNING` | HMAC-SHA-256 Key | Phase 1 Cursor | Phase 1 Contractを維持 |
 | `MEMORY_CURSOR_SIGNING` | HMAC-SHA-256 Key | Memory List / Search Cursor | 対象QueryをFail Closed |
 | `MEMORY_SEARCH_TERM` | HMAC-SHA-256 Key | Term Digest / Posting | Search Capabilityだけ閉じる |
+| `MEMORY_PROJECTION_DIGEST` | HMAC-SHA-256 Key | Projection Metadata Digest / Key Version | 新Projectionの検証・Activationを閉じる。既存Verified Active Versionは維持 |
 | `MEMORY_DELETION_GUARD` | HMAC-SHA-256 Key | Guard Fingerprint | Automatic Capture / Guard判定を閉じる |
 | `MEMORY_IDEMPOTENCY` | HMAC-SHA-256 Key | Client Key Digest | 対象Mutationを閉じる |
 | `MEMORY_REQUEST_INTEGRITY` | HMAC-SHA-256 Key | Canonical Request Digest | 対象Mutationを閉じる |
@@ -1341,6 +1342,7 @@ Startup時に有効化されるCapabilityごとに、Algorithm、Key長、Active
 | LAN TLS / Device Key | `PRIVATE_LAN_SECURE`を起動しない |
 | Cursor Key | 対象Pagination / Search EndpointをUnavailableにする |
 | Search Key | 管理検索はService Error、回答はMemoryなし、Relation比較は不完全結果を返さない |
+| Projection Digest Key | 新ProjectionのDigest検証・Activationを行わない。既存Verified Active Versionは変更せず、未Ready時はSection 36.9のPurpose別動作を適用 |
 | Guard Key | Automatic CaptureとGuard依存MutationをFail Closed。通常Readは継続 |
 | Idempotency / Request / Confirmation Key | 対象Mutation、ConfirmまたはExecuteをFail Closed |
 | Trace Integrity Key | 回答は継続、Traceは`NOT_RECORDED`、Failure Metricを記録 |

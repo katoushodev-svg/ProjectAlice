@@ -2353,6 +2353,7 @@ Projection Metadata例:
   "activeSemanticVersion": 7,
   "analyzerVersion": "KW_V1",
   "tokenKeyVersion": 1,
+  "projectionDigestKeyVersion": 1,
   "currentTermCount": 84,
   "currentTermPageCount": 1,
   "fallbackRequired": false,
@@ -2363,6 +2364,39 @@ Projection Metadata例:
 ```
 
 Term PageはSemantic Versionごとに最大100件のTerm Descriptorを持つ。Page-level Attributeとして`semanticVersion`、`analyzerVersion`、`tokenKeyVersion`およびPage番号を持ち、各Descriptorは`termDigest`、`termKind`および`weightCode`だけを保持する。Normalized Termや本文を保持しない。新VersionのPageを別KeyへStageするため、Worker失敗時にActive VersionのPageを上書きしない。旧VersionのPageは、そのVersionがHistorical Revisionになった後の削除・Key Rotation・Repairにも使用する。
+
+Projection Digestの目的、Canonical Byte Format、専用Purpose KeyおよびMetadata Version属性はADR-019で確定する。`projectionDigestKeyVersion`はProjection Digest用KeyのVersionであり、Term Digest用`tokenKeyVersion`とは独立したVersion Namespaceを持つ。
+
+Canonical Byte Format Version 1は次の形式を使用する。整数はすべて符号なしBig-endian、Lengthは後続ValueのUTF-8またはNested Field列のByte数を表すU32である。全Fieldは`Tag:u8 || Length:u32be || Value`で符号化し、TagとLength自身はLengthに含めない。固定幅整数Fieldも同じField Headerを持ち、Lengthは規定幅と一致しなければならない。U32範囲を超える値、未知Tag、順序違反、重複・欠落Field、長さ不一致、切詰めおよび末尾余剰Byteは拒否する。
+
+HeaderはASCII Byte列`APDG`の後にFormat Version `0x0001`（U16 Big-endian）を置く。Headerの後のTop-level Field順は固定する。
+
+| Tag | Field | Value Encoding |
+|---|---|---|
+| `0x01` | `memoryId` | `MemoryId.value()`のCanonical UUID v4 ASCII。UTF-8 Byte Lengthは36 |
+| `0x02` | `semanticVersion` | 正数Java `long`のU64 Big-endian、Length 8 |
+| `0x03` | `analyzerVersion` | 空でないVersion Stringの厳密UTF-8 Byte列。Unicode正規化・case変換なし |
+| `0x04` | `tokenKeyVersion` | 正数Java `int`のU32 Big-endian、Length 4 |
+| `0x05` | `pageCount` | U32 Big-endian、Length 4 |
+| `0x10` | Page Record（`pageCount`回） | Nested Field列。Tag順は`0x11`, `0x12`, 続いてDescriptor RecordをDescriptor数分 |
+
+Page Record内の`0x11 pageNumber`はU32 Big-endian、`0x12 descriptorCount`もU32 Big-endianとし、それぞれLength 4とする。ページ番号は0始まりの連番で、Page Recordを昇順に符号化する。Page数は0〜6、各PageのDescriptor数は1〜100、総Descriptor数は最大512とする。空ProjectionはPage数0としPage Recordを持たない。
+
+各DescriptorはPage Record内に`0x20` Descriptor Recordとして保存順に含める。Descriptor RecordのNested Field順は次のとおり。
+
+| Tag | Field | Value Encoding |
+|---|---|---|
+| `0x21` | `termDigest` | unpadded Base64url SHA-256文字列のASCII / UTF-8、Length 43 |
+| `0x22` | `termKind` | U8 stable code、Length 1: `LEXICAL=1`, `NGRAM_3=2`, `NGRAM_2=3`, `NGRAM_1=4` |
+| `0x23` | `weightCode` | 正数U32 Big-endian、Length 4。現在のKW_V1値はTerm Kindに対応する1〜4 |
+
+`termKind`のCanonical U8コードはこの表で固定する独立した識別子であり、Java Enum ordinal、Enum名、DynamoDBの`termKind`保存文字列から導出しない。KW_V1の既存`weightCode`は別Fieldで、`LEXICAL=4`、`NGRAM_3=3`、`NGRAM_2=2`、`NGRAM_1=1`。Canonical EncoderはTerm KindとそのWeight Codeの対応が一致しない入力を拒否する。
+
+Page RecordとDescriptor RecordのLengthは、それぞれのNested Field HeaderおよびValue全体のByte数とする。Stringは厳密なUTF-8 Encoderで符号化し、不正Unicode入力は置換せず拒否する。BuilderのDescriptor順は変更しない。Page Numberの欠番・重複、Page属性とMetadataのVersion / Analyzer / Token Key Version不一致、Metadataの`currentTermPageCount`または`currentTermCount`と再読込Pagesの不一致、Term KindとWeight Codeの不一致を拒否する。Canonical BytesにはMemory本文、Normalized Term、Key Material、`projectionDigestKeyVersion`、MetadataのStatus / `builtAt` / `fallbackRequired`を含めない。`fallbackRequired`とMetadata属性は別途Builder結果およびPage集計との一致を検証する。
+
+Projection Digestは`MEMORY_PROJECTION_DIGEST` Purpose Codeに専用のVersion付きKeyを割り当て、HMAC-SHA-256のMessageを`UTF8("alice-memory-projection-digest\0") || CanonicalByteFormatV1`とする。HMAC全32 ByteをBase64url without paddingで保存する。Digest比較は形式・長さを検証して復号した32 Byteに対しconstant-time比較する。Purpose KeyはTerm Digest用`MEMORY_SEARCH_TERM` Keyと異なるKey Materialを使い、Domain Separationだけを根拠に同一Materialを共用しない。Projection Digest KeyのVersionは`projectionDigestKeyVersion`へ保存し、Term用`tokenKeyVersion`を代用しない。Version付きPhase 2 KeyのRead最大2 / Write Active 1、Startup Probeおよび旧Version RetirementはSecurity設計§37.2–37.4に従い、Purposeごとに適用する。
+
+`projectionDigestKeyVersion`を欠く既存Metadataは、`tokenKeyVersion`からVersionを推定せず未検証Projectionとして扱う。Authoritative Memory / RevisionからProjectionを再構築し、新Version Pagesを書き、Digest検証に成功するまでReady候補にしない。既存PagesだけからDigestを作り直す操作は旧Pagesの正しさを証明しないため、Legacy Projectionの検証・移行として扱わない。未検証ProjectionのReadinessはSection 36.9のPurpose別Failure動作に従う。
 
 `activeSemanticVersion`は最後にProjection化したCreate / Semantic Update後のMemory Versionである。Confirmation-only Updateでは進めない。Root `version`が進んでもCurrent ContentとSemantic Fieldsが変わらなければ、既存ProjectionをCurrentとして利用できる。
 
@@ -2436,6 +2470,8 @@ Intent作成までをAuthoritative Transactionへ含める。Intent作成に失�
 
 Workerは`AVAILABLE#000...`から現在時刻までをKey ConditionでQueryする。Retry延期時は同じ`intentId`を維持し、旧Intent Deleteと新しい`nextAttemptAt` KeyへのPutを小さいTransactionで行う。Attribute FilterだけでRetry時刻を選別しない。
 
+Claim Owner、Takeover、Epoch Fencing、RenewalおよびActivation条件はADR-020に従う。Worker OwnerはUUID v4、Leaseは300秒、Epochは単調増加Numberとする。AVAILABLE / CLAIMED間の移動およびLease更新は旧Key Deleteと新Key Putの条件付きTransactionで行い、Lease期限切れだけでIntentを削除しない。ActivationはClaim Owner / Epoch / Lease期限を検証するIntent DeleteとMetadata更新を同一Transactionに含める。
+
 ### 36.8 Projection Worker and Activation
 
 WorkerはIntentを古い順に取得し、Memory単位の新しいIntentへ安全に収束させる。Intentが複数Version分溜まっている場合、Current Projectionは最新VersionへCoalesceできるが、存在するMemoryRevisionのSemantic Versionを飛ばしてHistorical検索不能にしてはならない。
@@ -2447,9 +2483,10 @@ WorkerはIntentを古い順に取得し、Memory単位の新しいIntentへ安�
 5. 最新Current Contentから`KW_V1` Termを決定的に生成する。
 6. 新Current Postingと新Semantic Version Term Pageを最大25 Writeずつ作成する。
 7. Fallback要否を反映する。
-8. 全Write成功確認後、Projection MetadataのActive Version更新とWorkerがClaimしたTarget Intent一件の削除を小さいTransactionでAtomicに行う。
-9. `targetVersion <= activeSemanticVersion`となったSuperseded Intentを最大25件ずつ削除する。すべて消えるまでManagement Search Readinessは未完了のままとする。
-10. 不要になった旧Current Postingを削除する。Historical削除用Versioned Term Pageは保持する。
+8. Staged Term PageをStrongly Consistent Readで再読込し、Page属性・連続Page Number・Descriptor構造・ページ順・Countを検証する。Read-back PageからCanonical Byte Format Version 1と同じ`tokenKeyVersion`でDigestを再計算し、Write前に同じWorker Attemptで算出したExpected Digestとconstant-time比較する。Page Read-backまたは比較に失敗した場合はActive Metadataを変更せず、Target Intentを完了扱いにしない。Expected DigestはActivation前にStaged Metadataへ保存せず、Worker再起動時はAuthoritative SourceからExpected Projectionを再構築する。
+9. 全Posting / Page Write成功、Fallback反映およびRead-back Digest一致を満たした後に限り、Projection Metadataの`activeSemanticVersion`、Term用`tokenKeyVersion`、`projectionDigest`、`projectionDigestKeyVersion`および関連Countsを更新し、WorkerがClaimしたTarget Intent一件を小さいTransactionでAtomicに削除する。Digest一致だけではActivationしない。
+10. `targetVersion <= activeSemanticVersion`となったSuperseded Intentを最大25件ずつ削除する。すべて消えるまでManagement Search Readinessは未完了のままとする。
+11. 不要になった旧Current Postingを削除する。Historical削除用Versioned Term Pageは保持する。
 
 Derived Posting / PageのBulk Put / Deleteは最大25 Operationの`BatchWriteItem`を使用できる。`UnprocessedItems`へExponential Backoff + Jitterを適用し、初回 + 最大5 Retryとする。すべて処理できるまでActive Versionを切り替えない。
 

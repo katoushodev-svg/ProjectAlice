@@ -1818,6 +1818,8 @@ Phase 2初期のProjection Schema、Mutation Intent、Worker、Activation、Read
 
 Search Term DigestはSecurity設計Section 37の`MEMORY_SEARCH_TERM` Purpose Keyを使う。Key MaterialとSecret Provider詳細はMemory Applicationへ公開せず、InfrastructureのPurpose別Digest Capabilityの内側に置く。Startup Capability GateがSearch Keyを利用できないと判定した場合、Answer Searchは`UNAVAILABLE`としてMemoryなしで継続する。Version読取は最大2件、Write Activeは常に1件とし、新VersionはCapability Probe後に有効化する。旧VersionはProjection再構築・参照解消後のRetirement条件を満たすまで維持する。Cursor、Deletion Guardなど別PurposeのKeyを共用しない。
 
+Projection全体のPage整合性DigestはADR-019および統合Database設計§36.5 / §36.8に従う。これはTerm Digestと別の`MEMORY_PROJECTION_DIGEST` Purpose Keyを使うInfrastructure Capabilityであり、Memory Applicationへ鍵素材を公開しない。Term `tokenKeyVersion`をProjection Digest Key Versionとして流用しない。Digest再検証が完了する前にProjectionをActive / Readyとして扱わない。
+
 #### Answer Search Result Completeness
 
 `AnswerMemorySearchPort`の契約は候補ListとSearch Completenessを分離して返す。候補のList順は順位を意味せず、Adapter内部のQuery順やDynamoDBの返却順をMemory ApplicationのRelevance Rankingとして使用しない。

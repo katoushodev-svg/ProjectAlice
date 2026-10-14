@@ -6,6 +6,8 @@ import com.projectalice.backend.conversation.application.ConversationSendService
 import com.projectalice.backend.conversation.application.ConversationReadService;
 import com.projectalice.backend.conversation.application.SendMessageUseCase;
 import com.projectalice.backend.conversation.application.context.ConversationContextBuilder;
+import com.projectalice.backend.memory.application.FindRelevantMemoriesUseCase;
+import com.projectalice.backend.memory.application.ValidateMemorySelectionUseCase;
 import com.projectalice.backend.conversation.application.policy.ConversationAiPolicy;
 import com.projectalice.backend.conversation.application.port.ConversationRepository;
 import com.projectalice.backend.conversation.application.prompt.ConversationPromptComposer;
@@ -76,8 +78,9 @@ public class ConversationConfiguration {
             InputTokenCounter counter, ConversationAiPolicy policy) {
         return new ConversationContextBuilder(repository, counter, policy);
     }
-    @Bean SendMessageUseCase sendMessageUseCase(ConversationContextBuilder builder, TextGenerationProvider provider) {
-        return new SendMessageUseCase(builder, provider);
+    @Bean SendMessageUseCase sendMessageUseCase(ConversationContextBuilder builder, TextGenerationProvider provider,
+            FindRelevantMemoriesUseCase memorySearch, ValidateMemorySelectionUseCase memorySelectionValidator) {
+        return new SendMessageUseCase(builder, provider, memorySearch, memorySelectionValidator);
     }
     @Bean ConversationSendService conversationSendService(ConversationRepository repository, SendMessageUseCase useCase,
             ConversationPromptComposer prompt, Clock clock,
