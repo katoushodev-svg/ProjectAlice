@@ -49,7 +49,7 @@ void main() {
       ),
     );
 
-    expect(find.text('メッセージを入力'), findsOneWidget);
+    expect(find.text('Message...'), findsOneWidget);
   });
 
   testWidgets('shows the 9000 character counter', (tester) async {

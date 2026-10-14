@@ -5,11 +5,11 @@
 | Item | Value |
 |---|---|
 | Document | `memory-design.md` |
-| Version | 50 |
+| Version | 53 |
 | Status | Reviewed — Implementation Ready |
 | Target Phase | Phase 2 — Personal Memory |
 | Implementation | Not Started |
-| Last Updated | 2026-09-02 JST |
+| Last Updated | 2026-10-11 JST |
 | Review Required | No |
 
 本ドキュメントは、Phase 2 Personal MemoryのArchitecture、責務、Boundary、主要Flow、Domain ModelおよびPortを定義するSource of Truthである。
@@ -1814,7 +1814,25 @@ Conceptual Fields:
 
 `MemorySearchProjection`はSearch Infrastructureの派生DataでありSource of Truthではない。Conversation Transcript、Memory Revision全文またはProvider Request / Responseを含めない。
 
-Projectionの更新に失敗してもAuthoritative Memoryを失敗扱いで削除しない。一方、Projection更新が未完了のMemoryを検索成功したように偽らず、整合性修復方式をDatabase / Search詳細設計で定義する。
+Phase 2初期のProjection Schema、Mutation Intent、Worker、Activation、ReadinessおよびRepairは、統合Database設計Section 36（DB2-045〜DB2-066 Accepted）に従う。Projection更新失敗でAuthoritative MemoryをRollbackせず、Projectionの未完了を検索成功として扱わない。Purpose別のReadiness動作は同Section 36.9を参照する。
+
+Search Term DigestはSecurity設計Section 37の`MEMORY_SEARCH_TERM` Purpose Keyを使う。Key MaterialとSecret Provider詳細はMemory Applicationへ公開せず、InfrastructureのPurpose別Digest Capabilityの内側に置く。Startup Capability GateがSearch Keyを利用できないと判定した場合、Answer Searchは`UNAVAILABLE`としてMemoryなしで継続する。Version読取は最大2件、Write Activeは常に1件とし、新VersionはCapability Probe後に有効化する。旧VersionはProjection再構築・参照解消後のRetirement条件を満たすまで維持する。Cursor、Deletion Guardなど別PurposeのKeyを共用しない。
+
+Projection全体のPage整合性DigestはADR-019および統合Database設計§36.5 / §36.8に従う。これはTerm Digestと別の`MEMORY_PROJECTION_DIGEST` Purpose Keyを使うInfrastructure Capabilityであり、Memory Applicationへ鍵素材を公開しない。Term `tokenKeyVersion`をProjection Digest Key Versionとして流用しない。Digest再検証が完了する前にProjectionをActive / Readyとして扱わない。
+
+#### Answer Search Result Completeness
+
+`AnswerMemorySearchPort`の契約は候補ListとSearch Completenessを分離して返す。候補のList順は順位を意味せず、Adapter内部のQuery順やDynamoDBの返却順をMemory ApplicationのRelevance Rankingとして使用しない。
+
+| Search Status | 契約 | 候補の扱い |
+|---|---|---|
+| `COMPLETE` | Ready Projectionに対するすべての対象Queryが完了し、Posting / Unique Candidate上限による切捨てがなく、受理したCandidate Setが検索可能範囲内で確定している | 候補をApplicationへ渡し、Authoritative Hydration / Eligibilityを別途適用する。0件は確定した検索結果として表現できる |
+| `PARTIAL` | Projection Pending / Readiness不足、Queryの一部失敗、Posting / Candidate上限、またはStale Posting検出により、検索可能範囲の完全性を保証できない | Ready ProjectionとDB2-061の検証を通過した候補だけを渡す。候補0件でも`PARTIAL`を保持し、完全な0件検索と区別する |
+| `UNAVAILABLE` | Search Key Capabilityまたは検索経路全体が利用不能で、信頼できる候補集合を返せない | 候補を返さず、成功した空検索として表現しない。ConversationはMemoryなしで継続する |
+
+`PARTIAL`では、Ready Projection由来の候補であってもAuthoritative Memory / Revision Hydration、Active Semantic Version、Revision、Reset GenerationおよびEligibilityの最終確認を通過したものだけを利用する。不完全な部分を推測で補完せず、未検証候補を返さない。検索由来のCompletenessと、検索後のAuthoritative Hydration失敗は別の状態として保持し、Trace / Resultで両方を識別できるようにする。Application全体のContext結果を`PARTIAL`とする場合も、どちらの段階が不完全だったかを失わない。
+
+この契約はDB2-055、DB2-057、DB2-061およびSecurity設計Section 37.3のFailure BoundaryをApplication Portへ写すものであり、DynamoDBのSchemaやAccepted Search方式を変更しない。
 
 ### 14.6 Candidate Generation Strategy
 
@@ -1827,7 +1845,7 @@ Projectionの更新に失敗してもAuthoritative Memoryを失敗扱いで削�
 | Semantic Search | 言い換えや意味的関連を見つけやすい | Cost、Index、Privacy、Model依存が増える |
 | AI-assisted Reranking | 文脈を考慮しやすい | Latency、Cost、非決定性が増える |
 
-Phase 2 ArchitectureはHybrid Searchへ拡張可能にするが、Vector StoreまたはEmbeddingを必須Technologyとして先行確定しない。初期実装方式はDatabase Access Pattern、Memory件数、検索品質Eval、Latency、CostおよびPrivacyを比較して決定する。
+Phase 2 ArchitectureはHybrid Searchへ拡張可能にするが、Vector StoreまたはEmbeddingを必須Technologyとして先行確定しない。初期Search方式はDynamoDB Keyword Inverted Indexとし、Analyzerは`KW_V1`を使用する（統合Database設計Section 36、DB2-045〜DB2-047）。Vector Store / Semantic Searchの追加は、Section 14.17およびDB2-066の定量評価・追加判断に従う。
 
 複数Sourceを使う場合、同じ`memoryId`を統合してからAuthoritative Hydrationへ進む。Search SourceごとのScoreをそのまま相互比較せず、Provider非依存Signalへ正規化する。
 
@@ -1848,7 +1866,9 @@ Rankingより先にHard Filterを適用する。高い類似度ScoreでもHard R
 
 ### 14.8 Relevance Ranking
 
-Hard Filter通過後、次のSignalを組み合わせて順位付けする。
+Hard Filter通過後、Answer SearchはProvider非依存のSignalを用いた重み付きスコア方式で候補を順位付けする（MD-142、ADR-018）。この方式選択はDB2-058のManagement Search順位TupleをAnswer Searchへ流用するものではない。Adapter / DynamoDBの返却順を順位として扱わない。Eligibilityと安全PolicyはRankingより前に適用し、Sensitivity、削除、Version、Reset等の不適格条件をスコアで相殺してはならない。
+
+Ranking Signalの契約上の型は、意味を持つ列挙値または検索由来の構造化Keyword Signalである。Signalは候補の根拠を表し、Memoryの真偽、保存可否、Security許可またはTool権限を表さない。
 
 | Signal | Meaning |
 |---|---|
@@ -1862,7 +1882,9 @@ Hard Filter通過後、次のSignalを組み合わせて順位付けする。
 | Recency | 更新時刻が新しい。ただし単独で最重要にしない |
 | Redundancy Penalty | 他の選択済みMemoryと意味が重複する |
 
-Ranking Scoreは候補の順序付けに利用できるが、Memory内容の真偽、保存可否、Security許可またはTool実行権限を決めるScoreとして使用しない。
+実装では、各Signalの値、出所、および値が存在しない場合を区別できるProvider非依存の契約を使う。Keyword SignalはDB2-058/§36.10–36.11のDistinct Term Match、Term Kind、Coverage、Query-side Hint MatchおよびPurpose別Signalを保持する。粗い`KEYWORD_MATCH`の有無だけに縮退させない。Application SignalはMemory ApplicationでAuthoritative Hydration後に評価する。Adapter由来Signalだけでは最終Answer順位を確定しない。
+
+欠損Signalは「根拠が観測されていない」状態として保持し、否定SignalやEligibility通過の代用にしない。重み、尺度、欠損Signalを合算する際の処理、閾値および同点処理は、DB2-065評価で決めるまで未確定とする。具体的な数値を導入する場合は評価結果とDecisionを根拠とし、未設定値の暗黙Defaultで順位を作らない。Semantic SearchはDB2-066の判断前に必須化しない。
 
 同じCategoryだけで上位を埋めず、質問へ必要な観点が複数ある場合は意味的な多様性を考慮する。ただしCategoryごとの固定件数を設け、強く関連するMemoryを機械的に除外しない。
 
@@ -1874,16 +1896,66 @@ Phase 2の初期Baseline：
 
 | Limit | Baseline |
 |---|---:|
-| Search Candidate Pool | 最大40件 |
+| Answer Search Adapter Unique Candidate | 最大200件 |
+| Search Candidate Pool（Memory Application選別後） | 最大40件 |
 | Final Memory Items | 最大8件 |
 | Estimated Memory Tokens | 最大1,500 tokens |
 | Memory UTF-8 Bytes | 最大12 KiB |
 
-すべての上限を同時に適用し、最初に到達した時点で追加を止める。これらはApplication Configurationとして管理し、Source Codeへ散在するMagic Numberにしない。
+DB2-045〜066の上限を区別する。Answer Search AdapterはPostingを最大1,000件評価し、最大200件のUnique Candidateを生成する。Adapter候補順で先頭40件を切り捨ててはならない。Memory Applicationは候補をAuthoritative HydrationしEligibilityを適用した後、Relevance Ranking、DeduplicationおよびDiversityを行い、最大40件のSearch Candidate Poolを形成する。その後にContext Budgetを適用し、最大8件を選択する。重複、Eligibility不適格候補、またはRanking後に40件未満となる場合は、後続段階へ存在する候補を使って上限まで処理する。40件は最大数であり、必ず埋める件数ではない。
+
+200件上限による切捨て、Posting上限、Projection readinessその他の検索不完全性は、MD-141の`COMPLETE` / `PARTIAL` / `UNAVAILABLE`で伝える。`PARTIAL`の場合は検証済み候補だけを扱い、完全な候補集合であるかのように報告しない。Applicationの40件選別はSearch Completenessを`COMPLETE`へ変えない。
+
+すべての後段上限を同時に適用する。8件に達したらBudget選択を終了する。個別候補を追加するとByteまたはToken上限を超える場合はその候補を省略し、後続候補を評価する。上限値はApplication Configurationとして管理し、Source Codeへ散在するMagic Numberにしない。
 
 ModelのContext Window、MemoryContent上限およびEval結果によりBaselineは調整可能とする。Architecture Boundaryを変えない単なるParameter調整はADR不要だが、設計書とTest Baselineを更新する。
 
 Memory本文を途中で切って意味を変えない。単一Memoryが残りBudgetを超える場合は、そのMemoryを省略するか、後続設計で承認された安全な要約方式を利用する。
+
+#### Token Estimation Contract
+
+Estimated Memory Tokensの適用には、`memory.application`が所有するProvider非依存の`TokenEstimator` Application Portを利用する。これはMemory ContextのBudget適用に必要な契約であり、AI Provider SDKや`ai` Featureの`InputTokenCounter`をMemory Featureから直接利用するものではない。
+
+Estimatorへの入力は、候補検索結果や`PersonalMemory` Aggregate全体ではなく、実際にMemory Contextへ含めるProvider非依存のPayloadとする。Payloadは本Sectionの「Memory Context Payload Serialization」で定義する単一文字列であり、最終Contextへ追加する順序を維持する。検索Score、Repository情報、Revision全文などContextへ含めない内部情報を推定対象へ混入させない。
+
+Estimatorの結果は、次の状態を区別できなければならない。
+
+- **Estimated**：推定に成功し、非負の推定Token数を返す。
+- **Unavailable**：実行時に推定を完了できなかった。推定値が得られたものとして扱わない。
+
+EstimatorがApplication構成に登録されていない状態は`Unavailable`ではない。必須Dependencyの欠落というConfiguration Errorとして起動時に検出し、通常の推定失敗Fallbackで隠さない。
+
+推定に成功した場合は、Final Memory Items、Estimated Memory Tokens、Memory UTF-8 Bytesの各上限を同時に適用する。実行時の推定失敗時はSection 14.16のFallbackを適用する。この場合、件数とUTF-8 Byte上限は維持するが、推定値がないため1,500 tokens以内であることは保証しない。内部Result / Traceでも、推定成功とFallbackによる推定不能を区別する。
+
+Token Estimatorの具体的なAlgorithm、Libraryおよび推定精度はDeferredとする。Payload Serializationは本Sectionで定義し、Token Estimator実装はこのSerialization済み文字列を受け取る。これらを確定するまでは、推定成功を装う固定値や仮のEstimatorを導入しない。
+
+#### Memory Context Payload Serialization
+
+Memory Applicationは、Budget候補となる`MemoryContextItem`の順序付きListから、単一のProvider非依存テキストPayloadを生成する。PayloadはMemory Contextの内容そのものとし、AI Provider向けRequestやInstructionsは生成しない。
+
+Serializationは次の規則に従う。
+
+1. PayloadはMemory本文だけを要素とするJSON文字列配列とする。例：`["札幌に住んでいる。","設計を重視する。"]`。
+2. 配列要素の順序は、入力された候補順序と同一にする。呼出側で再ソートしない。
+3. JSONはUTF-8、BOMなし、配列外に空白を加えないcompact形式とする。文字列内の`"`と`\\`をescapeする。U+0008、U+0009、U+000A、U+000C、U+000Dはそれぞれ`\\b`、`\\t`、`\\n`、`\\f`、`\\r`を使い、その他のU+0000〜U+001Fは小文字hexの`\\u00xx`を使う。`/`はescapeしない。有効なsurrogate pairはUTF-8文字として出力し、対応相手のないsurrogate code unitは小文字hexの`\\udxxx`形式でescapeする。その他のUnicode文字はUTF-8でそのまま出力し、Unicode正規化を行わない。
+4. Memory本文の文字列値へ、ラベル、箇条書き、Category、IDまたは他のMetadataを追加しない。Memory本文自体に含まれる空白・改行は変更しない。JSON serializationに必要なescapeはPayload上の表現として適用する。
+5. Memory間の区切りはJSON配列のcommaとする。独自の改行区切りやProvider固有role/message boundaryをPayloadへ追加しない。
+6. Memoryが0件の場合、Memory Context blockを作らずPayloadは空文字列とする。0件のPayloadに対するEstimator呼出しは不要で、Memory Token Budgetの消費量は0とする。
+7. `MemoryContent`はDomain生成時に前後空白をtrimし、空白のみの内容を拒否する。Payload生成時に追加のtrim、空文字列除外または内容修正を行わない。
+
+`memoryId`、`memoryVersion`、`category`、`state`、`sensitivityLevel`、`temporalRole`および`relevanceReasonCodes`は、Memory選別、Validation、Traceまたは説明のための内部情報であり、Payload本文へ含めない。特にSensitivity LevelはMemory利用可否の内部Policy入力であり、Providerへ送る必要性が設計されていないため開示しない。AI ContextのSource Typeは将来のContext構造上で区別し、Provider-neutralなContext Builderが`PERSONAL_MEMORY`として運ぶ。Memory ApplicationのPayload文字列へSourceラベルを重複挿入しない。
+
+12 KiB上限は従来どおり、選択した各Memory本文のUnicode文字列をUTF-8へ符号化したbyte数の合計に適用する。JSONの括弧、comma、quoteおよびescapeによるSerialization overheadは12 KiBには含めず、TokenEstimatorが計数するPayload文字列には含める。したがって、Token上限と本文byte上限は別々の対象を測る。
+
+同じ順序と同じMemory本文Listからは同じPayload文字列を生成する。実装はこの規則に従う単一のSerializerを用意し、Budget計数と後続AI Contextへの受け渡しに同じ生成結果を用いる。AI Context BuilderおよびProvider AdapterはPayload本文をtrim、再escape、再serialize、再分割またはラベル付けしてはならない。Provider wire formatの構造的なrole / block framingはProvider Adapterの責務でありMemory Payload本文に含めない。Phase 1のAI `InputTokenCounter`はInstructions、会話Message、Provider側framingを含むGeneration Request全体を数える別契約であり、Memory専用1,500-token Budgetの代替にしない。
+
+#### Cumulative Estimation and Candidate Selection
+
+候補はSearch、Authoritative Hydration、Eligibility、Ranking、DeduplicationおよびDiversityを終えた順に評価する。候補ごとに、既選択Memoryへ当該候補を追加したListから上記のPayload全体を再生成し、TokenEstimatorでその累積文字列を計数する。個別Memoryごとの計数値を合算してはならない。BPE Tokenizerでは結合前後でtoken境界が変わり得て、separatorとJSON serialization overheadも合算方式では表現できないためである。
+
+各候補について、Final Memory Itemsが8件に達していたら評価を終了する。候補本文のUTF-8 byte数が残り12 KiBを超える場合はその候補を省略する。そうでなければ候補を追加した累積Payloadを計数し、1,500 tokensを超える場合もその候補を省略する。byteまたはtoken超過候補を省略した後も、件数上限へ達するまで後続候補を現在の選択済みListに対して評価する。すべての上限内なら選択し、次候補へ進む。本文は切断しない。
+
+Estimatorが`Unavailable`を返すか実行時例外で計数できない場合、それまでにToken Budgetを根拠に選択した部分Listと推定値を破棄する。元のdiversified候補列から§14.16のFallbackを適用し、最大8件と本文UTF-8最大12 KiBだけで選択する。FallbackではJSON Serialization済みPayloadを後続Contextへ渡すが、1,500 tokens以内とは扱わない。Estimator未登録は引き続き起動時Configuration Errorであり、このFallbackへ変換しない。
 
 ### 14.10 MemoryContextItem
 
@@ -2004,6 +2076,28 @@ Search ProjectionまたはIndexはAuthoritative Memoryより遅れる可能性�
 
 AI Provider呼出し直前に、少なくともMemory ID、VersionおよびReset Generationが有効であることを最終確認できるBoundaryを設ける。確認失敗時は該当Itemを除外し、古いContentを送信しない。
 
+Conversationへ返す選択結果は、Providerへ渡すPayloadとは別に、Memory Application内で照合できるRequest-scope Selection Referenceを持つ。このReferenceはReset Generationと、Payload順に対応するMemory ID / Versionを含む内部情報であり、AI Context blockまたはProvider Requestへ含めない。`AiContextBlock.referenceId`はこのSelection Referenceを指すApplication内のopaqueな参照とし、Memory IDなどを埋め込まない。ConversationはReferenceをMemory Applicationの最終検証Boundaryへ戻し、RepositoryやReset Generationの保存先へ直接アクセスしない。
+
+最終検証は、選択時のReset Generation、各Memory ID / Version、最新State、Sensitivityおよび利用EligibilityをAuthoritative Sourceで確認する。Reset Generationが変化していた場合は、そのSelectionに属する全Memoryを無効化する。対象Memoryが削除済み、Versionが変化、またはEligibilityを満たさない場合はそのItemを除外し、新しいVersionのContentへ暗黙に差し替えない。元の最大40件Candidate Poolへ戻って代替Memoryを検索・補充しない。これにより、最終確認後に別の候補へ置き換わることを避け、Provider直前のPayloadを選択時の根拠へ結び付ける。
+
+検証により一部Itemが除外された場合、Memory Applicationは残存する検証済みItemだけを元の相対順序で再評価し、Memory Context Payload SerializerでPayloadを再生成する。最大8件、本文UTF-8合計12 KiBおよび推定1,500 tokensを適用し、Token推定不能時は残存Itemに対する既定Fallbackを適用する。旧PayloadをConversation側で編集・分割してはならない。
+
+#### Conversation Request BudgetによるMemory縮小
+
+Generation Request全体のBudget超過時に限り、Conversation ApplicationはMemory Applicationへ選択済みMemory Contextの縮小を依頼できる。縮小Requestは元Selection Referenceと除外対象Referenceを渡す。Memory Applicationは元の最終選択済みListだけを対象とし、初回検索の未選択Candidateを再検索・補充しない。選択済みListは最大8件であり、既定の40件Candidate Pool上限は初回検索にのみ適用する。
+
+縮小Requestで指定できる件数、推定Token数および本文UTF-8 Byte数の上限は、元Request以下かつ既定上限（8件、1,500 tokens、12 KiB）以下とする。正の縮小上限は元Selectionからさらに制約できる。Memoryを0件にする場合は0件のBudgetを偽装せず、空Selection / Memory blockなしとして表す。各縮小結果は同じ順序の残存ItemからPayloadを再生成し、Memory Budgetを再適用する。Memory Applicationは指定された除外Itemを復活させず、本文を切り詰めない。
+
+ConversationはMemory Itemの独自順位を推測しない。Memory Applicationが返した選択順を保持し、縮小時はその末尾から一つずつ除外する。これは出力順を再現可能な縮小順として使う規則であり、Contextの情報源優先順位とは別である。選択順はMemory ApplicationがRelevance / Diversity Policyに従って決定する。
+
+Token Estimatorが実行時に`Unavailable`の場合も、Conversation Request Budgetの縮小は実行できる。Conversationは末尾Itemを一つずつMemory Applicationに除外させ、返されたFallback Payloadを含むGeneration Request全体を`InputTokenCounter`で再計数する。Memory Estimatorの推定値を必要とせず、各段階で実際の完成Requestを数える。Estimator未登録は引き続き起動時Configuration Errorである。
+
+縮小は単調で、各段階で少なくとも一つの元選択Itemを除外し、Itemを追加しない。したがって最大8回の縮小でMemory blockは空になる。空になってもGeneration Requestが上限を超える場合は、AI設計の残りの削減順を適用し、InstructionsとCurrent User Message等の不可削除要素だけでも上限超過ならGenerationを開始しない。Token countに失敗したRequestをProviderへ送らない。
+
+最終検証を含むContext準備は最大8件の元Selectionを単調に縮小し、安定した検証結果を一度得るまで繰り返す。除外可能なItemは一度だけ失効・除外でき、最大8回の縮小と最大9回の最終Validation（最大8回の変更検出と、変更なしの安定確認）で終了する。各Payload変更後にMemory BudgetとGeneration Request全体Budgetを再適用する。縮小 / Validation回数上限に先に達し、Input Token Count Stage Deadlineに残り時間がある場合はMemory blockを空にしてRequestを再構築・再計数する。Deadlineが先に尽きた場合は再計数せずProvider呼出しを中止する。MemoryなしのRequestでも上限超過または計数不能ならProvider呼出しを中止する。
+
+最終検証が保証するのは、Validation BoundaryがAuthoritative Sourceを読んだ時点で対象ID、Version、Reset GenerationおよびEligibilityが有効だったことまでである。Validation後に発生する更新を排除する保証ではない。検証とProvider呼出しの間に競合更新が起きないことを保証するLock / Reservationは本Decisionで導入しない。
+
 ### 14.16 Failure and Fallback
 
 | Failure | Safe Behavior |
@@ -2013,7 +2107,8 @@ AI Provider呼出し直前に、少なくともMemory ID、VersionおよびReset
 | 一部Search Source失敗 | 検証済み候補だけを利用し、PartialとしてTrace |
 | Authoritative Hydration失敗 | 該当候補を使用しない |
 | Ranking失敗 | 未順位候補をすべて渡さず、Memoryなしまたは安全なDeterministic順位へFallback |
-| Token Estimate失敗 | Item / UTF-8 Byte上限を使用して無制限追加を防ぐ |
+| Token Estimate実行時失敗 | Final Memory Items最大8件 / UTF-8 Byte最大12 KiBを適用して無制限追加を防ぐ。Token推定値がないため1,500 tokens以内は保証せず、内部Result / Traceで推定不能Fallbackを区別する |
+| Token Estimator未登録 | Application構成不備として起動時に検出する。実行時推定失敗Fallbackへ変換しない |
 | Final Validation失敗 | 該当MemoryをContextから除外 |
 
 Memory検索失敗をConversation全体のUnexpected Errorへ変換しない。Aliceは取得できなかったMemoryを知っているように振る舞わず、必要ならMemory利用がUnavailableだったことを説明できる。
@@ -2043,17 +2138,19 @@ Vector Store追加はPersistence変更ではなくSearch Capability追加とし�
 
 ### 14.18 Initial Baseline and Deferred Details
 
-本Sectionで確定するのはBoundary、Flow、安全Ruleおよび初期Context上限である。次は後続設計で確定する。
+Phase 2初期Search方式、`KW_V1` Analyzer、HMAC Term Key、Projection / Posting Schema、Mutation Intent / Worker、Readiness、DynamoDB Primary Key Query、Candidate Pool上限および初期Search Evaluation条件は、統合Database設計Section 36（DB2-045〜DB2-066 Accepted）で確定している。これらをDeferredとして扱わず、実装は当該設計の物理Schema・上限・障害時動作に従う。既存の統合Database設計をMemory設計で再定義しない。
 
-- Phase 2初期Search AdapterとAccess Pattern
-- Keyword NormalizationとLanguage処理
-- Ranking Weight、Minimum Relevance ThresholdおよびTie-breaker
-- Token Estimator実装
-- Search ProjectionのDynamoDB / Search Schema
-- Semantic Search / Embedding Model / Vector Store採否
-- Index更新Consistency、RetryおよびRepair Queue
-- Eval Dataset、Target MetricsおよびAcceptance Threshold
-- Memory Usage TraceのPersistenceとRetention
+次の事項は引き続き未確定であり、Accepted仕様を超える実装判断を必要とする。
+
+- Weighted Scoreの数式、Signalごとの値尺度と重み、欠損値の合算方法、任意のRelevance Threshold、同点時の順序。これらはDB2-065の評価対象であり、Accepted済み数値はない。現行`MemoryRelevanceRankingPolicy.preservingInputOrder()`は正式順位ではなく、Adapter返却順をRelevance順位とみなしてはならない。
+- DB2-065の最低300 Scenarioと合否Targetを維持した上で、重み・尺度・欠損値規則を比較決定するための具体的Datasetと校正・比較手順。評価用Datasetの内容・生成方法は同Decisionで固定されていない。
+- Token Estimatorの具体的なAlgorithm、Libraryおよび推定精度。
+- Semantic Search / Embedding Model / Vector Storeの将来採否。DB2-066とSection 14.17の評価条件を満たすまでは初期実装へ含めない。
+- Memory Usage TraceのPersistenceとRetention。
+
+Search KeyのPurpose、Startup Capability Gate、Failure Scope、Version上限およびRotation LifecycleはSecurity設計Section 37で確定している。具体的なSecret Provider TechnologyとDeployment Configuration名はInfrastructure実装時の選択であり、Memory Application Portへ露出させない。Phase 1のCursor Keyや他Purpose Keyを流用してはならない。
+
+DB2-065は初期評価の最低Scenario数とRecall / Precision / Safety / Latency Targetを定める。評価用Datasetの具体的な内容・生成方法など、同Decisionで固定されていない詳細は評価実装時に別途定義する。
 
 ---
 
@@ -2192,6 +2289,15 @@ API、PersistenceおよびTest Caseへの詳細Traceabilityは後続設計で追
 | MD-083 | Provider呼出し直前にMemory ID、VersionおよびReset Generationを最終検証する | Accepted |
 | MD-084 | Memory検索失敗時はMemoryなしでConversationを継続し、取得できたように振る舞わない | Accepted |
 | MD-085 | Semantic Search / Vector Store採否を実Memoryに基づくEval、Latency、CostおよびPrivacyで判断する | Accepted |
+| MD-134 | Token Estimatorを`memory.application`所有のProvider非依存Application Portとして定義し、実際にMemory Contextへ含めるPayloadを推定対象とする | Accepted |
+| MD-135 | Token Estimatorの未登録はConfiguration Errorとして起動時に検出し、実行時推定失敗とは区別する | Accepted |
+| MD-136 | Token推定実行時失敗時は最大8件・UTF-8最大12 KiBのFallbackを適用し、1,500 tokens以内は保証せず、推定不能状態を内部で区別する | Accepted |
+| MD-137 | Memory Context Payloadを本文だけの順序付きcompact JSON文字列配列として生成し、候補追加ごとに累積Payload全体を計数する | Accepted |
+| MD-138 | Memory ContextをAiContextBlockのPERSONAL_MEMORY Sourceと完成Payloadで表し、ConversationがMemory Applicationを一方向に呼び出す | Accepted |
+| MD-139 | Request Budget縮小と最終検証では元の最終選択Memoryだけを単調に縮小し、Memory ApplicationがPayloadとMemory Budgetを再生成・再適用する | Accepted |
+| MD-140 | Provider入力MappingとInputTokenCounterは同一Mapperを使用し、Memory Contextを独立した低権限user messageとして会話messagesの前に配置する | Accepted |
+| MD-141 | Answer Search PortはSearch Completenessと候補Listを分離し、Partial時は検証済み候補だけを返し、Search状態とHydration状態を区別する | Accepted |
+| MD-142 | Answer SearchはHard Eligibility後にProvider非依存Signalの重み付き方式で順位付けし、最大200 Unique CandidateからApplication側で最大40件のCandidate Poolを選ぶ | Accepted |
 
 これらは既存Architectureを変更せず、Approved Phase 2 Requirementsを具体化する。Architecture変更が必要になった場合は、勝手に本表を変更せずADR要否を判断する。
 

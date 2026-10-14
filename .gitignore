@@ -8,3 +8,6 @@
 **/target/
 .mvn/timing.properties
 .mvn/wrapper/maven-wrapper.jar
+
+# Local secrets
+.env

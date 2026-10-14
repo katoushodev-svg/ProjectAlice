@@ -111,9 +111,11 @@ class AppConfiguration {
       throw AppConfigurationException('Base URL scheme must be http or https');
     }
 
-    // Check http constraint: only allowed for 127.0.0.1 with allowLocalHttp=true
+    // HTTP is allowed only for explicitly permitted development hosts.
     if (scheme == 'http') {
-      if (!allowLocalHttp || uri.host != '127.0.0.1') {
+      const allowedDevelopmentHosts = {'127.0.0.1', '100.72.70.80'};
+
+      if (!allowLocalHttp || !allowedDevelopmentHosts.contains(uri.host)) {
         throw AppConfigurationException(
           'HTTP scheme is not allowed for this configuration',
         );

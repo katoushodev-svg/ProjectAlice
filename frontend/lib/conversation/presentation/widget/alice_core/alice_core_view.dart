@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'alice_core_assets.dart';
+import 'alice_core_energy_painter.dart';
 import 'alice_core_glow_painter.dart';
 import 'alice_core_ring_painter.dart';
 import 'alice_core_visual_state.dart';
@@ -207,11 +208,22 @@ class _AliceCoreViewState extends State<AliceCoreView>
                     ),
                   ),
 
-                  // 3. Glow Painter
+                  // 3. Outer Glow Painter
                   CustomPaint(
                     size: Size(widget.size, widget.size),
                     painter: AliceCoreGlowPainter(
                       visualState: widget.visualState,
+                      pulseProgress: pulseValue,
+                      reduceMotion: reduceMotion,
+                    ),
+                  ),
+
+                  // 4. Subtle energy inside the existing Core image.
+                  CustomPaint(
+                    size: Size(widget.size, widget.size),
+                    painter: AliceCoreEnergyPainter(
+                      visualState: widget.visualState,
+                      phase: rotationValue,
                       pulseProgress: pulseValue,
                       reduceMotion: reduceMotion,
                     ),

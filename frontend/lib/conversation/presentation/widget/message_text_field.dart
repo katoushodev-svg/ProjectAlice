@@ -25,31 +25,56 @@ class MessageTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      enabled: enabled,
-      onChanged: onChanged,
-      minLines: ConversationLayoutMetrics.composerMinLines,
-      maxLines: ConversationLayoutMetrics.composerMaxLines,
-      keyboardType: TextInputType.multiline,
-      textInputAction: TextInputAction.newline,
-      // A tighter line height than AliceTextStyles.body keeps a 5 line Draft
-      // within the Composer's 136 logical pixel Maximum Height budget.
-      style: AliceTextStyles.body.copyWith(
-        height: 1.3,
-        color: AliceColorTokens.textPrimary,
-      ),
-      cursorColor: AliceColorTokens.primary,
-      decoration: InputDecoration(
-        border: InputBorder.none,
-        isDense: true,
-        contentPadding: EdgeInsets.zero,
-        hintText: 'メッセージを入力',
-        hintStyle: AliceTextStyles.body.copyWith(
-          color: AliceColorTokens.textSecondary,
-        ),
-      ),
+    return AnimatedBuilder(
+      animation: focusNode,
+      builder: (context, child) {
+        final isFocused = enabled && focusNode.hasFocus;
+
+        return Container(
+          constraints: const BoxConstraints(
+            minHeight: ConversationLayoutMetrics.sendButtonMinSize,
+          ),
+          decoration: BoxDecoration(
+            color: AliceColorTokens.surface,
+            border: Border.all(
+              color: isFocused
+                  ? AliceColorTokens.primary
+                  : AliceColorTokens.border,
+            ),
+            borderRadius: BorderRadius.circular(16.0),
+          ),
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            textAlignVertical: TextAlignVertical.center,
+            enabled: enabled,
+            onChanged: onChanged,
+            minLines: ConversationLayoutMetrics.composerMinLines,
+            maxLines: ConversationLayoutMetrics.composerMaxLines,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            // Keep five lines within the Composer's 136 logical pixel budget,
+            // including its optional validation/counter row.
+            style: AliceTextStyles.body.copyWith(
+              height: 1.2,
+              color: AliceColorTokens.textPrimary,
+            ),
+            cursorColor: AliceColorTokens.primary,
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12.0),
+              hintText: 'Message...',
+              hintStyle: AliceTextStyles.body.copyWith(
+                color: AliceColorTokens.textSecondary,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

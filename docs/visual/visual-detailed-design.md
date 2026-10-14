@@ -501,7 +501,7 @@ Visual:
 - focus border `primary`;
 - radius 14–18;
 - 1–5 lines;
-- placeholder `メッセージを入力`;
+- placeholder `Message...`;
 - text `body`;
 - placeholder `textSecondary`.
 

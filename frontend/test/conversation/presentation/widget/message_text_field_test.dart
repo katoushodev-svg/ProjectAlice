@@ -33,7 +33,7 @@ void main() {
       buildTestable(controller: controller, focusNode: focusNode),
     );
 
-    expect(find.text('メッセージを入力'), findsOneWidget);
+    expect(find.text('Message...'), findsOneWidget);
   });
 
   testWidgets('does not autofocus on first build', (tester) async {

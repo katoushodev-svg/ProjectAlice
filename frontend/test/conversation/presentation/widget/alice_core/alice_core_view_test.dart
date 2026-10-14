@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:alice/conversation/presentation/widget/alice_core/alice_core_assets.dart';
+import 'package:alice/conversation/presentation/widget/alice_core/alice_core_energy_painter.dart';
 import 'package:alice/conversation/presentation/widget/alice_core/alice_core_view.dart';
 import 'package:alice/conversation/presentation/widget/alice_core/alice_core_visual_state.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +28,16 @@ Widget buildTestableWidget(Widget child) {
       ),
     ),
   );
+}
+
+AliceCoreEnergyPainter energyPainterFrom(WidgetTester tester) {
+  final customPaint = tester.widget<CustomPaint>(
+    find.byWidgetPredicate(
+      (widget) =>
+          widget is CustomPaint && widget.painter is AliceCoreEnergyPainter,
+    ),
+  );
+  return customPaint.painter! as AliceCoreEnergyPainter;
 }
 
 void main() {
@@ -215,6 +226,107 @@ void main() {
         (imageWidget.image as AssetImage).assetName,
         equals(AliceCoreAssets.coreBase),
       );
+    });
+
+    testWidgets('includes the central energy overlay painter', (tester) async {
+      await tester.pumpWidget(
+        buildTestableWidget(
+          const AliceCoreView(
+            visualState: AliceCoreVisualState.idle,
+            size: 180.0,
+          ),
+        ),
+      );
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is CustomPaint && widget.painter is AliceCoreEnergyPainter,
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('Idle animation phase reaches the Energy Painter', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        buildTestableWidget(
+          const AliceCoreView(
+            visualState: AliceCoreVisualState.idle,
+            size: 180.0,
+            reduceMotion: false,
+          ),
+        ),
+      );
+      final initialPhase = energyPainterFrom(tester).phase;
+
+      await tester.pump(const Duration(milliseconds: 500));
+      final laterPhase = energyPainterFrom(tester).phase;
+
+      expect(laterPhase, isNot(initialPhase));
+    });
+
+    testWidgets('Thinking rotation and pulse reach the Energy Painter', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        buildTestableWidget(
+          const AliceCoreView(
+            visualState: AliceCoreVisualState.thinking,
+            size: 180.0,
+            reduceMotion: false,
+          ),
+        ),
+      );
+      final initialPainter = energyPainterFrom(tester);
+
+      await tester.pump(const Duration(milliseconds: 500));
+      final laterPainter = energyPainterFrom(tester);
+
+      expect(laterPainter.phase, isNot(initialPainter.phase));
+      expect(laterPainter.pulseProgress, isNot(initialPainter.pulseProgress));
+    });
+
+    testWidgets('Streaming animation phase reaches the Energy Painter', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        buildTestableWidget(
+          const AliceCoreView(
+            visualState: AliceCoreVisualState.streaming,
+            size: 180.0,
+            reduceMotion: false,
+          ),
+        ),
+      );
+      final initialPhase = energyPainterFrom(tester).phase;
+
+      await tester.pump(const Duration(milliseconds: 500));
+      final laterPhase = energyPainterFrom(tester).phase;
+
+      expect(laterPhase, isNot(initialPhase));
+    });
+
+    testWidgets('Reduce Motion keeps Energy Painter inputs static', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        buildTestableWidget(
+          const AliceCoreView(
+            visualState: AliceCoreVisualState.thinking,
+            size: 180.0,
+            reduceMotion: true,
+          ),
+        ),
+      );
+      final initialPainter = energyPainterFrom(tester);
+
+      await tester.pump(const Duration(seconds: 2));
+      final laterPainter = energyPainterFrom(tester);
+
+      expect(laterPainter.phase, initialPainter.phase);
+      expect(laterPainter.pulseProgress, initialPainter.pulseProgress);
     });
   });
 

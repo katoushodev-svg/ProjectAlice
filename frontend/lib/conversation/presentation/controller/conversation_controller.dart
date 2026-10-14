@@ -517,6 +517,12 @@ final class ConversationController extends ChangeNotifier {
   }
 
   void _failInitialLoad(ConversationFailure failure) {
+    debugPrint(
+      '[Alice][InitialLoad] '
+      'category=${failure.category} '
+      'operation=${failure.operation}',
+    );
+
     _reduce(
       state_event.InitialLoadFailed(
         ConversationFailure(

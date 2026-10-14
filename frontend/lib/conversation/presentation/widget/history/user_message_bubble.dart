@@ -12,18 +12,19 @@ final class UserMessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       label: 'あなた: $content',
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: FractionallySizedBox(
-          widthFactor: .78,
+      child: LayoutBuilder(
+        builder: (context, constraints) => Align(
           alignment: Alignment.centerRight,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AliceColorTokens.surfaceStrong,
-              borderRadius: BorderRadius.circular(18),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: constraints.maxWidth * .78),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AliceColorTokens.surfaceStrong,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: SelectableText(content, style: AliceTextStyles.body),
             ),
-            child: SelectableText(content, style: AliceTextStyles.body),
           ),
         ),
       ),

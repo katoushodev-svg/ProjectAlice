@@ -1,0 +1,19 @@
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:3.3.0
+    container_name: project-alice-dynamodb-local
+    command:
+      - -jar
+      - DynamoDBLocal.jar
+      - -sharedDb
+      - -dbPath
+      - ./data
+      - -disableTelemetry
+    working_dir: /home/dynamodblocal
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - project-alice-dynamodb-data:/home/dynamodblocal/data
+
+volumes:
+  project-alice-dynamodb-data:
