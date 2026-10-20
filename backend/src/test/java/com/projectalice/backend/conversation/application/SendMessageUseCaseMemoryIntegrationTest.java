@@ -23,6 +23,7 @@ import com.projectalice.backend.conversation.domain.ConversationMessage;
 import com.projectalice.backend.conversation.domain.ConversationMessageRole;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesResult;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesUseCase;
+import com.projectalice.backend.memory.application.GetMemoryPreferencesUseCase;
 import com.projectalice.backend.memory.application.MemoryContextBudget;
 import com.projectalice.backend.memory.application.MemoryContextItem;
 import com.projectalice.backend.memory.application.MemoryRelevanceReasonCode;
@@ -32,6 +33,7 @@ import com.projectalice.backend.memory.application.SearchCompleteness;
 import com.projectalice.backend.memory.application.ValidateMemorySelectionUseCase;
 import com.projectalice.backend.memory.domain.MemoryCategory;
 import com.projectalice.backend.memory.domain.MemoryId;
+import com.projectalice.backend.memory.domain.MemoryPreferences;
 import com.projectalice.backend.memory.domain.MemoryState;
 import com.projectalice.backend.memory.domain.SensitivityLevel;
 import java.time.Duration;
@@ -124,6 +126,75 @@ class SendMessageUseCaseMemoryIntegrationTest {
 
         assertThat(provider.request).isNotNull();
         assertThat(provider.request.contextBlocks()).isEmpty();
+    }
+
+
+    @Test
+    void disabledAnswerUseDoesNotSearchMemories() {
+        ConversationContextBuilder builder = builder();
+        FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
+        ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        CapturingProvider provider = new CapturingProvider();
+
+        when(preferences.execute()).thenReturn(
+                MemoryPreferences.reconstitute(false, false, 2, NOW));
+
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
+                "instructions", userMessage("What did I say?"), EXECUTION_CONTEXT, delta -> {});
+
+        verify(search, never()).execute(any());
+        assertThat(provider.request).isNotNull();
+        assertThat(provider.request.contextBlocks())
+                .noneMatch(block -> block.source() == AiContextSource.PERSONAL_MEMORY);
+    }
+
+    @Test
+    void disablingAnswerUseDuringRetrievalRemovesMemoryBeforeProviderDispatch() {
+        ConversationContextBuilder builder = builder();
+        FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
+        ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        CapturingProvider provider = new CapturingProvider();
+
+        MemoryContextItem searchedItem = item("private memory");
+        MemorySelectionReference selected = MemorySelectionReference.capture(
+                7, SearchCompleteness.COMPLETE, List.of(searchedItem));
+        FindRelevantMemoriesResult found = result(
+                searchedItem, "[\"private memory\"]", selected);
+        when(search.execute(any())).thenReturn(found);
+        when(validator.validate(eq(selected), any())).thenReturn(found);
+        when(preferences.execute()).thenReturn(
+                MemoryPreferences.reconstitute(true, true, 1, NOW),
+                MemoryPreferences.reconstitute(true, false, 2, NOW.plusSeconds(1)));
+
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
+                "instructions", userMessage("What did I say?"), EXECUTION_CONTEXT, delta -> {});
+
+        verify(search).execute(any());
+        verify(validator).validate(eq(selected), any());
+        assertThat(provider.request).isNotNull();
+        assertThat(provider.request.contextBlocks())
+                .noneMatch(block -> block.source() == AiContextSource.PERSONAL_MEMORY);
+    }
+
+    @Test
+    void preferenceReadFailureDoesNotSendPersonalMemory() {
+        ConversationContextBuilder builder = builder();
+        FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
+        ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        CapturingProvider provider = new CapturingProvider();
+
+        when(preferences.execute()).thenThrow(new IllegalStateException("preferences unavailable"));
+
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
+                "instructions", userMessage("What did I say?"), EXECUTION_CONTEXT, delta -> {});
+
+        verify(search, never()).execute(any());
+        assertThat(provider.request).isNotNull();
+        assertThat(provider.request.contextBlocks())
+                .noneMatch(block -> block.source() == AiContextSource.PERSONAL_MEMORY);
     }
 
     private static ConversationContextBuilder builder() {
