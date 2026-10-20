@@ -11,6 +11,8 @@ import com.projectalice.backend.conversation.application.context.ConversationCon
 import com.projectalice.backend.conversation.domain.ConversationMessage;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesResult;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesUseCase;
+import com.projectalice.backend.memory.application.GetMemoryPreferencesUseCase;
+import com.projectalice.backend.memory.domain.MemoryPreferences;
 import com.projectalice.backend.memory.application.MemoryContextBudget;
 import com.projectalice.backend.memory.application.MemoryRetrievalPurpose;
 import com.projectalice.backend.memory.application.MemoryRetrievalQuery;
@@ -33,13 +35,14 @@ public final class SendMessageUseCase {
     private final TextGenerationProvider textGenerationProvider;
     private final FindRelevantMemoriesUseCase memorySearch;
     private final ValidateMemorySelectionUseCase memorySelectionValidator;
+    private final GetMemoryPreferencesUseCase memoryPreferences;
 
     /** Compatibility constructor for callers that intentionally run without Memory retrieval. */
     public SendMessageUseCase(
             ConversationContextBuilder contextBuilder,
             TextGenerationProvider textGenerationProvider
     ) {
-        this(contextBuilder, textGenerationProvider, null, null);
+        this(contextBuilder, textGenerationProvider, null, null, null);
     }
 
     public SendMessageUseCase(
@@ -47,6 +50,16 @@ public final class SendMessageUseCase {
             TextGenerationProvider textGenerationProvider,
             FindRelevantMemoriesUseCase memorySearch,
             ValidateMemorySelectionUseCase memorySelectionValidator
+    ) {
+        this(contextBuilder, textGenerationProvider, memorySearch, memorySelectionValidator, null);
+    }
+
+    public SendMessageUseCase(
+            ConversationContextBuilder contextBuilder,
+            TextGenerationProvider textGenerationProvider,
+            FindRelevantMemoriesUseCase memorySearch,
+            ValidateMemorySelectionUseCase memorySelectionValidator,
+            GetMemoryPreferencesUseCase memoryPreferences
     ) {
         this.contextBuilder = Objects.requireNonNull(contextBuilder, "contextBuilder must not be null");
         this.textGenerationProvider =
@@ -56,6 +69,7 @@ public final class SendMessageUseCase {
         }
         this.memorySearch = memorySearch;
         this.memorySelectionValidator = memorySelectionValidator;
+        this.memoryPreferences = memoryPreferences;
     }
 
     public TextGenerationResult execute(
@@ -66,11 +80,42 @@ public final class SendMessageUseCase {
     ) {
         Objects.requireNonNull(deltaHandler, "deltaHandler must not be null");
         TextGenerationRequest request = contextBuilder.build(instructions, currentUserMessage, executionContext);
-        if (memorySearch != null) {
+
+        // Read preferences before retrieval. If preferences cannot be trusted, do not retrieve memories.
+        if (memorySearch != null && isAnswerUseEnabled()) {
             request = addValidatedMemoryContext(request, currentUserMessage);
         }
-        // Selection is revalidated synchronously immediately before dispatch to the provider.
+
+        // Recheck immediately before dispatch so a setting changed during retrieval is respected.
+        // Preference-read failures fail closed for memory context, without blocking a memoryless answer.
+        if (!isAnswerUseEnabled()) {
+            request = withoutPersonalMemoryContext(request);
+        }
         return textGenerationProvider.generate(request, executionContext, deltaHandler);
+    }
+
+    private boolean isAnswerUseEnabled() {
+        // Compatibility constructors are retained for existing callers that do not wire preferences.
+        if (memoryPreferences == null) {
+            return true;
+        }
+        try {
+            MemoryPreferences preferences = memoryPreferences.execute();
+            return preferences != null && preferences.answerUseEnabled();
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private static TextGenerationRequest withoutPersonalMemoryContext(TextGenerationRequest request) {
+        List<AiContextBlock> retainedBlocks = request.contextBlocks().stream()
+                .filter(block -> block.source() != AiContextSource.PERSONAL_MEMORY)
+                .toList();
+        if (retainedBlocks.size() == request.contextBlocks().size()) {
+            return request;
+        }
+        return new TextGenerationRequest(
+                request.workload(), request.instructions(), request.messages(), retainedBlocks);
     }
 
     private TextGenerationRequest addValidatedMemoryContext(

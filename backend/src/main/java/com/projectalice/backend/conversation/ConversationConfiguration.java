@@ -7,6 +7,7 @@ import com.projectalice.backend.conversation.application.ConversationReadService
 import com.projectalice.backend.conversation.application.SendMessageUseCase;
 import com.projectalice.backend.conversation.application.context.ConversationContextBuilder;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesUseCase;
+import com.projectalice.backend.memory.application.GetMemoryPreferencesUseCase;
 import com.projectalice.backend.memory.application.ValidateMemorySelectionUseCase;
 import com.projectalice.backend.conversation.application.policy.ConversationAiPolicy;
 import com.projectalice.backend.conversation.application.port.ConversationRepository;
@@ -79,8 +80,10 @@ public class ConversationConfiguration {
         return new ConversationContextBuilder(repository, counter, policy);
     }
     @Bean SendMessageUseCase sendMessageUseCase(ConversationContextBuilder builder, TextGenerationProvider provider,
-            FindRelevantMemoriesUseCase memorySearch, ValidateMemorySelectionUseCase memorySelectionValidator) {
-        return new SendMessageUseCase(builder, provider, memorySearch, memorySelectionValidator);
+            FindRelevantMemoriesUseCase memorySearch, ValidateMemorySelectionUseCase memorySelectionValidator,
+            GetMemoryPreferencesUseCase memoryPreferences) {
+        return new SendMessageUseCase(
+                builder, provider, memorySearch, memorySelectionValidator, memoryPreferences);
     }
     @Bean ConversationSendService conversationSendService(ConversationRepository repository, SendMessageUseCase useCase,
             ConversationPromptComposer prompt, Clock clock,

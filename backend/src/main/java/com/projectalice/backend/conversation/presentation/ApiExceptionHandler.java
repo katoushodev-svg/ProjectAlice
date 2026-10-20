@@ -73,8 +73,12 @@ public final class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         case "CONVERSATION_NOT_FOUND" -> "Conversation not found";
         case "NOT_ACCEPTABLE" -> "Not acceptable"; case "UNSUPPORTED_MEDIA_TYPE" -> "Unsupported media type";
         case "CONVERSATION_BUSY" -> "Conversation is busy"; case "REQUEST_IN_PROGRESS" -> "Request in progress";
-        case "IDEMPOTENCY_KEY_CONFLICT" -> "Idempotency key conflict"; default -> "Internal error"; };
-    }
+        case "IDEMPOTENCY_KEY_CONFLICT" -> "Idempotency key conflict";
+        case "PRECONDITION_REQUIRED" -> "Precondition required";
+        case "PRECONDITION_FAILED" -> "Precondition failed";
+        case "SERVICE_UNAVAILABLE" -> "Service unavailable";
+        default -> "Internal error";
+    }; }
     private static String requestId(HttpServletRequest request) {
         Object id=request.getAttribute(RequestIdFilter.ATTRIBUTE); return id == null ? java.util.UUID.randomUUID().toString() : id.toString();
     }
