@@ -81,30 +81,51 @@ public final class SendMessageUseCase {
         Objects.requireNonNull(deltaHandler, "deltaHandler must not be null");
         TextGenerationRequest request = contextBuilder.build(instructions, currentUserMessage, executionContext);
 
-        // Read preferences before retrieval. If preferences cannot be trusted, do not retrieve memories.
-        if (memorySearch != null && isAnswerUseEnabled()) {
-            request = addValidatedMemoryContext(request, currentUserMessage);
+        MemoryPreferences initialPreferences = null;
+        boolean memoryContextAdded = false;
+
+        // Memory retrieval requires an explicit, readable preference.
+        // Missing preferences fail closed when Memory retrieval is configured.
+        if (memorySearch != null) {
+            initialPreferences = readMemoryPreferences();
+            if (initialPreferences != null && initialPreferences.answerUseEnabled()) {
+                TextGenerationRequest withMemory =
+                        addValidatedMemoryContext(request, currentUserMessage);
+                memoryContextAdded =
+                        hasPersonalMemoryContext(withMemory);
+                request = withMemory;
+            }
         }
 
-        // Recheck immediately before dispatch so a setting changed during retrieval is respected.
-        // Preference-read failures fail closed for memory context, without blocking a memoryless answer.
-        if (!isAnswerUseEnabled()) {
-            request = withoutPersonalMemoryContext(request);
+        // Recheck immediately before provider dispatch. A disabled preference,
+        // changed version, or read failure removes Memory context but does not
+        // prevent an ordinary answer.
+        if (memoryContextAdded) {
+            MemoryPreferences latestPreferences = readMemoryPreferences();
+            if (latestPreferences == null
+                    || !latestPreferences.answerUseEnabled()
+                    || latestPreferences.version() != initialPreferences.version()) {
+                request = withoutPersonalMemoryContext(request);
+            }
         }
+
         return textGenerationProvider.generate(request, executionContext, deltaHandler);
     }
 
-    private boolean isAnswerUseEnabled() {
-        // Compatibility constructors are retained for existing callers that do not wire preferences.
+    private MemoryPreferences readMemoryPreferences() {
         if (memoryPreferences == null) {
-            return true;
+            return null;
         }
         try {
-            MemoryPreferences preferences = memoryPreferences.execute();
-            return preferences != null && preferences.answerUseEnabled();
+            return memoryPreferences.execute();
         } catch (RuntimeException unavailable) {
-            return false;
+            return null;
         }
+    }
+
+    private static boolean hasPersonalMemoryContext(TextGenerationRequest request) {
+        return request.contextBlocks().stream()
+                .anyMatch(block -> block.source() == AiContextSource.PERSONAL_MEMORY);
     }
 
     private static TextGenerationRequest withoutPersonalMemoryContext(TextGenerationRequest request) {

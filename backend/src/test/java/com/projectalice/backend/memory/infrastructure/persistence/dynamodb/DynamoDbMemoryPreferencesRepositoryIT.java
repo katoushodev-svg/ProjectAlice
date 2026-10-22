@@ -200,6 +200,13 @@ class DynamoDbMemoryPreferencesRepositoryIT {
                         FEATURE_STATE_PK,
                         FEATURE_STATE_SK,
                         "preferencesInitialized"));
+
+        assertEquals(
+                "2026-10-16T10:00:00.000+09:00",
+                readString(
+                        FEATURE_STATE_PK,
+                        FEATURE_STATE_SK,
+                        "preferencesInitializedAt"));
     }
 
     @Test

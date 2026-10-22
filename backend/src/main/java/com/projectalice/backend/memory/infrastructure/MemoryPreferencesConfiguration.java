@@ -23,7 +23,7 @@ public class MemoryPreferencesConfiguration {
     @Bean
     MemoryPreferencesRepository memoryPreferencesRepository(
             DynamoDbClient client,
-            @Value("${ALICE_DYNAMODB_TABLE_NAME:project-alice-conversation-local}")
+            @Value("${ALICE_MEMORY_DYNAMODB_TABLE_NAME:project-alice-memory-local}")
                     String table) {
         return new DynamoDbMemoryPreferencesRepository(client, table);
     }

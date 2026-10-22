@@ -59,6 +59,9 @@ class SendMessageUseCaseMemoryIntegrationTest {
         FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
         ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
         CapturingProvider provider = new CapturingProvider();
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        when(preferences.execute()).thenReturn(
+                MemoryPreferences.reconstitute(true, true, 1, NOW));
 
         MemoryContextItem searchedItem = item("searched text");
         MemorySelectionReference selected = MemorySelectionReference.capture(7, SearchCompleteness.COMPLETE,
@@ -73,7 +76,7 @@ class SendMessageUseCaseMemoryIntegrationTest {
         when(search.execute(any())).thenReturn(found);
         when(validator.validate(eq(selected), any())).thenReturn(validated);
 
-        new SendMessageUseCase(builder, provider, search, validator).execute(
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
                 "instructions", userMessage("What did I say?"), EXECUTION_CONTEXT, delta -> {});
 
         assertThat(provider.request).isNotNull();
@@ -99,9 +102,12 @@ class SendMessageUseCaseMemoryIntegrationTest {
         FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
         ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
         CapturingProvider provider = new CapturingProvider();
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        when(preferences.execute()).thenReturn(
+                MemoryPreferences.reconstitute(true, true, 1, NOW));
         when(search.execute(any())).thenReturn(FindRelevantMemoriesResult.unavailable());
 
-        new SendMessageUseCase(builder, provider, search, validator).execute(
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
                 "instructions", userMessage("Hello"), EXECUTION_CONTEXT, delta -> {});
 
         assertThat(provider.request).isNotNull();
@@ -115,13 +121,16 @@ class SendMessageUseCaseMemoryIntegrationTest {
         FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
         ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
         CapturingProvider provider = new CapturingProvider();
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        when(preferences.execute()).thenReturn(
+                MemoryPreferences.reconstitute(true, true, 1, NOW));
         MemoryContextItem searchedItem = item("stale text");
         MemorySelectionReference selected = MemorySelectionReference.capture(7, SearchCompleteness.COMPLETE,
                 List.of(searchedItem));
         when(search.execute(any())).thenReturn(result(searchedItem, "[\"stale text\"]", selected));
         when(validator.validate(eq(selected), any())).thenThrow(new IllegalStateException("reset changed"));
 
-        new SendMessageUseCase(builder, provider, search, validator).execute(
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
                 "instructions", userMessage("Hello"), EXECUTION_CONTEXT, delta -> {});
 
         assertThat(provider.request).isNotNull();
@@ -190,6 +199,52 @@ class SendMessageUseCaseMemoryIntegrationTest {
 
         new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
                 "instructions", userMessage("What did I say?"), EXECUTION_CONTEXT, delta -> {});
+
+        verify(search, never()).execute(any());
+        assertThat(provider.request).isNotNull();
+        assertThat(provider.request.contextBlocks())
+                .noneMatch(block -> block.source() == AiContextSource.PERSONAL_MEMORY);
+    }
+
+
+    @Test
+    void changedPreferenceVersionRemovesMemoryBeforeProviderDispatch() {
+        ConversationContextBuilder builder = builder();
+        FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
+        ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
+        GetMemoryPreferencesUseCase preferences = mock(GetMemoryPreferencesUseCase.class);
+        CapturingProvider provider = new CapturingProvider();
+
+        MemoryContextItem memory = item("private memory");
+        MemorySelectionReference selected = MemorySelectionReference.capture(
+                7, SearchCompleteness.COMPLETE, List.of(memory));
+        FindRelevantMemoriesResult found =
+                result(memory, "[\"private memory\"]", selected);
+
+        when(search.execute(any())).thenReturn(found);
+        when(validator.validate(eq(selected), any())).thenReturn(found);
+        when(preferences.execute()).thenReturn(
+                MemoryPreferences.reconstitute(true, true, 1, NOW),
+                MemoryPreferences.reconstitute(true, true, 2, NOW.plusSeconds(1)));
+
+        new SendMessageUseCase(builder, provider, search, validator, preferences).execute(
+                "instructions", userMessage("What did I say?"), EXECUTION_CONTEXT, delta -> {});
+
+        verify(search).execute(any());
+        assertThat(provider.request).isNotNull();
+        assertThat(provider.request.contextBlocks())
+                .noneMatch(block -> block.source() == AiContextSource.PERSONAL_MEMORY);
+    }
+
+    @Test
+    void missingPreferencesFailsClosedForMemoryRetrieval() {
+        ConversationContextBuilder builder = builder();
+        FindRelevantMemoriesUseCase search = mock(FindRelevantMemoriesUseCase.class);
+        ValidateMemorySelectionUseCase validator = mock(ValidateMemorySelectionUseCase.class);
+        CapturingProvider provider = new CapturingProvider();
+
+        new SendMessageUseCase(builder, provider, search, validator).execute(
+                "instructions", userMessage("Hello"), EXECUTION_CONTEXT, delta -> {});
 
         verify(search, never()).execute(any());
         assertThat(provider.request).isNotNull();

@@ -32,7 +32,7 @@ public class MemorySearchConfiguration {
     private static final String SEARCH_PROBE = "xByOEBw-3aY0WaUv7Lo4rcHxEp6UonFD6Ht-t3RQo-Q";
 
     @Bean MemoryResetPointRepository memoryResetPointRepository(DynamoDbClient client,
-            @Value("${ALICE_DYNAMODB_TABLE_NAME:project-alice-conversation-local}") String table) {
+            @Value("${ALICE_MEMORY_DYNAMODB_TABLE_NAME:project-alice-memory-local}") String table) {
         return new DynamoDbMemoryResetPointRepository(client, table);
     }
 
@@ -41,7 +41,7 @@ public class MemorySearchConfiguration {
     }
 
     @Bean PersonalMemoryRepository personalMemoryRepository(DynamoDbClient client,
-            @Value("${ALICE_DYNAMODB_TABLE_NAME:project-alice-conversation-local}") String table) {
+            @Value("${ALICE_MEMORY_DYNAMODB_TABLE_NAME:project-alice-memory-local}") String table) {
         return new DynamoDbPersonalMemoryRepository(client, table);
     }
 
@@ -82,7 +82,7 @@ public class MemorySearchConfiguration {
     }
 
     @Bean AnswerMemorySearchPort answerMemorySearchPort(DynamoDbClient client,
-            @Value("${ALICE_DYNAMODB_TABLE_NAME:project-alice-conversation-local}") String table,
+            @Value("${ALICE_MEMORY_DYNAMODB_TABLE_NAME:project-alice-memory-local}") String table,
             MemorySearchTermCapability capability) {
         return new DynamoDbAnswerMemorySearchAdapter(client, table, capability.digest(),
                 new DynamoDbMemorySearchIntentStore(client, table));

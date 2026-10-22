@@ -137,9 +137,13 @@ public final class DynamoDbMemoryPreferencesRepository
         Map<String, AttributeValue> preferencesItem = toItem(defaults);
         validateItemSize(preferencesItem, "Memory Preferences");
 
+        String initializedAtValue = formatTimestamp(initializedAt);
+
         Map<String, AttributeValue> projectedFeatureState =
                 new HashMap<>(featureState);
         projectedFeatureState.put("preferencesInitialized", bool(true));
+        projectedFeatureState.put(
+                "preferencesInitializedAt", s(initializedAtValue));
         validateItemSize(projectedFeatureState, "Memory Feature State");
 
         Put preferencesPut = Put.builder()
@@ -156,7 +160,8 @@ public final class DynamoDbMemoryPreferencesRepository
                 .tableName(tableName)
                 .key(featureStateKey())
                 .updateExpression(
-                        "SET #preferencesInitialized = :initialized")
+                        "SET #preferencesInitialized = :initialized, "
+                                + "#preferencesInitializedAt = :initializedAt")
                 .conditionExpression(
                         "#itemType = :itemType "
                                 + "AND #schemaVersion = :schemaVersion "
@@ -164,9 +169,11 @@ public final class DynamoDbMemoryPreferencesRepository
                 .expressionAttributeNames(Map.of(
                         "#itemType", "itemType",
                         "#schemaVersion", "schemaVersion",
-                        "#preferencesInitialized", "preferencesInitialized"))
+                        "#preferencesInitialized", "preferencesInitialized",
+                        "#preferencesInitializedAt", "preferencesInitializedAt"))
                 .expressionAttributeValues(Map.of(
                         ":initialized", bool(true),
+                        ":initializedAt", s(initializedAtValue),
                         ":itemType", s(FEATURE_STATE_ITEM_TYPE),
                         ":schemaVersion", n(SCHEMA_VERSION),
                         ":notInitialized", bool(false)))
