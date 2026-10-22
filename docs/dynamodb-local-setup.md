@@ -332,3 +332,152 @@ Transaction ConflictはFake / Mock Testで補い、AWS固有Behaviorは必要に
 - `database-design.md`
 - `development-environment.md`
 - `security-design.md`
+
+---
+
+## 15. Phase 2 Memory Feature State Initialization
+
+本 Section は Phase 2 Memory のローカル初期化手順を定義する。
+
+Database Contract の Source of Truth は
+`docs/integrated/database-design.md` とする。
+
+### 15.1 Environment Variable
+
+Memory 用 Table の環境変数は次のとおり。
+
+```bash
+export ALICE_MEMORY_DYNAMODB_TABLE_NAME=project-alice-memory-local
+```
+
+Conversation 用 Table と Memory 用 Table は分離する。
+Memory 用 Table の名前は Backend の設定と一致させること。
+
+### 15.2 Initialization Scope
+
+初期化スクリプトは、次の Feature State Item だけを作成する。
+
+| Attribute | Value |
+|---|---|
+| `pk` | `MEMORY_SETTINGS#GLOBAL` |
+| `sk` | `FEATURE_STATE` |
+| `itemType` | `MEMORY_FEATURE_STATE` |
+| `schemaVersion` | `1` |
+| `preferencesInitialized` | `false` |
+| `createdAt` | 初期化時のJST Offset付き日時 |
+
+既存 Item を上書きしてはならない。
+Feature State がすでに存在する場合は、現在の Item を確認してから対応する。
+
+このスクリプトは Memory Preferences のデフォルト値を作成しない。
+Preferences の初期化は Backend Repository の責務とし、
+Feature State の存在と初期化状態を確認して Transaction で実施する。
+
+### 15.3 Create Memory Table
+
+DynamoDB Local が起動していることを確認する。
+
+```bash
+docker compose -f backend/compose.yaml ps dynamodb-local
+```
+
+Memory Table がまだ存在しない場合に限り、次のコマンドで作成する。
+既存 Table がある場合は再作成しない。
+
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
+aws dynamodb create-table \
+  --table-name project-alice-memory-local \
+  --attribute-definitions \
+    AttributeName=pk,AttributeType=S \
+    AttributeName=sk,AttributeType=S \
+  --key-schema \
+    AttributeName=pk,KeyType=HASH \
+    AttributeName=sk,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST \
+  --region ap-northeast-1 \
+  --endpoint-url http://localhost:8000
+```
+
+Table の状態を確認する。
+
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
+aws dynamodb describe-table \
+  --table-name project-alice-memory-local \
+  --region ap-northeast-1 \
+  --endpoint-url http://localhost:8000
+```
+
+`TableStatus` が `ACTIVE` になるまで、後続の初期化処理へ進まない。
+
+### 15.4 Configure TTL
+
+Database Design で定義された TTL 属性は
+`expiresAtEpochSeconds` である。
+
+TTL を有効化する場合は、Memory Table が `ACTIVE` であることを確認してから実行する。
+
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
+aws dynamodb update-time-to-live \
+  --table-name project-alice-memory-local \
+  --time-to-live-specification \
+    Enabled=true,AttributeName=expiresAtEpochSeconds \
+  --region ap-northeast-1 \
+  --endpoint-url http://localhost:8000
+```
+
+TTL の状態を確認する。
+
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
+aws dynamodb describe-time-to-live \
+  --table-name project-alice-memory-local \
+  --region ap-northeast-1 \
+  --endpoint-url http://localhost:8000
+```
+
+TTL の設定変更が反映されるまで時間がかかる場合がある。
+
+### 15.5 Initialize Feature State
+
+前提条件:
+
+- DynamoDB Local が起動していること
+- Memory Table が存在し、`ACTIVE` であること
+- AWS CLI v2 が利用できること
+- Repository Root で実行すること
+
+次のコマンドは DynamoDB Local 専用である。
+Endpoint を省略せず、Local 以外の Endpoint を指定してはならない。
+
+```bash
+./backend/scripts/initialize-phase2-memory-feature-state.sh \
+  --endpoint-url http://localhost:8000 \
+  --table-name project-alice-memory-local
+```
+
+スクリプトが失敗した場合、既存 Item を削除したり上書きしたりせず、
+現在の Feature State を読み取って原因を確認する。
+
+### 15.6 Verify Feature State
+
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
+aws dynamodb get-item \
+  --table-name project-alice-memory-local \
+  --key '{"pk":{"S":"MEMORY_SETTINGS#GLOBAL"},"sk":{"S":"FEATURE_STATE"}}' \
+  --consistent-read \
+  --region ap-northeast-1 \
+  --endpoint-url http://localhost:8000
+```
+
+期待する初期状態は `preferencesInitialized = false` である。
+
+初期化後の Preferences 作成と
+`preferencesInitialized = true` への変更は、
+Backend Repository が Database Design の Transaction 契約に従って行う。
+
+DynamoDB Local の全データ削除や Table 再作成は、
+この手順には含めない。
