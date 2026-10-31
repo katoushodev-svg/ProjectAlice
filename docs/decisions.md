@@ -1430,3 +1430,28 @@ Decision
 8. Lease 300秒は既存Database設計のShort Operation Processing Lease上限/default（最大5分）に合わせる。これはIntentのSLAではなくTakeover前の所有期間であり、Workerは処理継続中にRenewする。
 
 ---
+
+ADR-021 Relation Review AEAD and Key Lifecycle
+
+Status
+
+Accepted
+
+Context
+
+Relation ReviewはCandidateとMutation PreviewというPersonal Dataを最大30分保持する。既存Relation AEADはAES-GCM、96-bit Nonce、128-bit Tagを実装していたが、暗号スイート、複数BackendでのNonce一意性、鍵の外部管理境界およびKey Referenceの廃止条件が確定していなかった。
+
+Decision
+
+1. Relation Candidate / PreviewはRelation Purpose専用AES-256-GCMで暗号化する。NonceはKey Versionごとの32-bit CSPRNG PrefixとDynamoDB Key Controlの条件付き64-bit単調Counterから構成し、Counter予約は暗号化に先行する。予約後の失敗でCounterを戻さず、Counter枯渇時はFail Closedとする。
+2. GCM Tagは128-bitとし、EnvelopeはCiphertext（Tagを含む）、Nonce、AAD Schema VersionおよびState Key Versionを分離して保持する。
+3. AADは固定長Big Endian Encodingとし、Purpose、Schema Version、Review UUID、Review Version、Key Version、Source Operation、Payload KindおよびTarget Ordinalを含む。Binding不一致、鍵取得失敗、未知VersionおよびAEAD認証失敗は同一の安全なUnavailable境界で拒否し、別鍵や平文へFallbackしない。
+4. Relation Keyは外部Secret Boundaryで生成・保管し、Relation専用Providerから取得する。Key Material、Provider Handleおよび例外詳細を設定、DynamoDB、ログ、Metric、TraceまたはAPIへ保存しない。Key Versionは再利用せず、同時参照VersionはDatabase設計の最大2を維持する。
+5. Reference Identityは`(keyVersion, relationReviewId)`とし、Reference状態・Version Count・Relation Global Active Countは条件付きTransactionで一緒に遷移する。Ciphertext Cleanup確認とReviewの未解放条件が同じRelease Transactionに参加できない間、Reference削除・Active Count減算を単独成功させない。
+6. Reviewの固定30分期限、Active最大20件、およびSection 45 TXLのAction / Byte上限を維持する。設計書Section 42.12をPhysical SchemaのSource of Truthとする。
+
+Consequences
+
+開発・本番のSecret Providerが接続されるまでは暗号化機能をSpringへ有効化しない。Key Control／Referenceの永続化はReview Metadata、Active DirectoryおよびIdempotency Bindingと同一Transactionを構成できる範囲でのみ公開する。既存JCE AES-GCM実装はNonce Providerを必須化し、DynamoDB ControlのAtomic Counterへ接続する。
+
+---

@@ -157,12 +157,18 @@ public final class PostingSearchPipeline {
     private final PersonalMemoryRepository personalMemoryRepository;
     private final DynamoDbSearchEvidenceReader evidenceReader;
     private final SearchCandidateFinalValidator finalValidator;
+    private final CandidateGenerationLatencyMetrics latencyMetrics;
+
+    /** Exposes the bounded, content-free samples owned by this pipeline instance. */
+    public CandidateGenerationLatencyMetrics latencyMetrics() {
+        return latencyMetrics;
+    }
 
     /** Candidate-generation-only compatibility constructor. Not a final validated search path. */
     public PostingSearchPipeline(
             DynamoDbPostingReader postingReader,
             PostingCandidateAccumulator accumulator) {
-        this(postingReader, accumulator, null, null, null);
+        this(postingReader, accumulator, null, null, null, new CandidateGenerationLatencyMetrics());
     }
 
     /** Constructor for the Current-candidate final-validation path. */
@@ -172,8 +178,20 @@ public final class PostingSearchPipeline {
             PersonalMemoryRepository personalMemoryRepository,
             DynamoDbSearchEvidenceReader evidenceReader,
             SearchCandidateFinalValidator finalValidator) {
+        this(postingReader, accumulator, personalMemoryRepository, evidenceReader, finalValidator,
+                new CandidateGenerationLatencyMetrics());
+    }
+
+    public PostingSearchPipeline(
+            DynamoDbPostingReader postingReader,
+            PostingCandidateAccumulator accumulator,
+            PersonalMemoryRepository personalMemoryRepository,
+            DynamoDbSearchEvidenceReader evidenceReader,
+            SearchCandidateFinalValidator finalValidator,
+            CandidateGenerationLatencyMetrics latencyMetrics) {
         this.postingReader = Objects.requireNonNull(postingReader, "postingReader must not be null");
         this.accumulator = Objects.requireNonNull(accumulator, "accumulator must not be null");
+        this.latencyMetrics = Objects.requireNonNull(latencyMetrics, "latencyMetrics must not be null");
         boolean allAbsent = personalMemoryRepository == null && evidenceReader == null && finalValidator == null;
         boolean allPresent = personalMemoryRepository != null && evidenceReader != null && finalValidator != null;
         if (!allAbsent && !allPresent) {
@@ -191,6 +209,13 @@ public final class PostingSearchPipeline {
     public Result search(
             MemoryRetrievalPurpose purpose,
             List<DynamoDbPostingReader.QueryTerm> queryTerms) {
+        return latencyMetrics.measure(metricPurpose(purpose),
+                () -> searchCandidatesTimed(purpose, queryTerms), Result::completeness);
+    }
+
+    private Result searchCandidatesTimed(
+            MemoryRetrievalPurpose purpose,
+            List<DynamoDbPostingReader.QueryTerm> queryTerms) {
         Objects.requireNonNull(purpose, "purpose must not be null");
         List<DynamoDbPostingReader.QueryTerm> terms = List.copyOf(
                 Objects.requireNonNull(queryTerms, "queryTerms must not be null"));
@@ -206,6 +231,14 @@ public final class PostingSearchPipeline {
      * Any evidence read failure makes the entire result UNAVAILABLE (with no accepted candidates).
      */
     public ValidatedResult search(
+            MemoryRetrievalPurpose purpose,
+            List<DynamoDbPostingReader.QueryTerm> queryTerms,
+            CurrentValidationRequest validationRequest) {
+        return latencyMetrics.measure(metricPurpose(purpose),
+                () -> searchValidatedTimed(purpose, queryTerms, validationRequest), ValidatedResult::completeness);
+    }
+
+    private ValidatedResult searchValidatedTimed(
             MemoryRetrievalPurpose purpose,
             List<DynamoDbPostingReader.QueryTerm> queryTerms,
             CurrentValidationRequest validationRequest) {
@@ -434,6 +467,13 @@ public final class PostingSearchPipeline {
         return purpose == MemoryRetrievalPurpose.ANSWER_CURRENT
                 || purpose == MemoryRetrievalPurpose.RELATION_DECISION
                 || purpose == MemoryRetrievalPurpose.MANAGEMENT_SEARCH;
+    }
+
+    private static CandidateGenerationLatencyMetrics.Purpose metricPurpose(MemoryRetrievalPurpose purpose) {
+        Objects.requireNonNull(purpose, "purpose must not be null");
+        return purpose == MemoryRetrievalPurpose.RELATION_DECISION
+                ? CandidateGenerationLatencyMetrics.Purpose.RELATION
+                : CandidateGenerationLatencyMetrics.Purpose.ANSWER;
     }
 
     private static boolean isUnavailableDecision(SearchCandidateFinalValidator.Decision decision) {

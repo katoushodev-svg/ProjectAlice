@@ -7,6 +7,7 @@ import java.util.Optional;
 public interface PersonalMemoryRepository {
     void save(PersonalMemory memory);
 
+    /** Reads the current aggregate authoritatively; implementations must use a strongly consistent read. */
     Optional<PersonalMemory> findById(MemoryId memoryId);
 
     /**

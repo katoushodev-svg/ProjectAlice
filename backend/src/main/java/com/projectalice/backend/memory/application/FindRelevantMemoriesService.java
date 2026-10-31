@@ -112,19 +112,6 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
         }
         List<MemorySearchCandidate> candidates = searchResult.candidates();
 
-        if (candidates.size() > query.contextBudget().maxCandidateItems()) {
-            // The 40-item Application Pool must be selected after authoritative hydration and
-            // relevance ranking. Until the accepted ranking parameters are implemented, do not
-            // silently turn the adapter's list order into a selected prefix.
-            return new FindRelevantMemoriesResult(
-                    searchResult.completeness(),
-                    FindRelevantMemoriesResult.HydrationStatus.NOT_ATTEMPTED,
-                    List.of(),
-                    "",
-                    FindRelevantMemoriesResult.EstimationStatus.NOT_ATTEMPTED,
-                    OptionalLong.empty());
-        }
-
         int candidateLimit = candidates.size();
         List<MemoryRankingCandidate> eligible = new ArrayList<>();
         boolean partial = false;
@@ -157,12 +144,19 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                     OptionalLong.empty());
         }
 
-        List<MemoryRankingCandidate> ranked = List.copyOf(rankingPolicy.rank(query, List.copyOf(eligible)));
+        List<MemoryRankingCandidate> ranked =
+                List.copyOf(rankingPolicy.rank(query, List.copyOf(eligible)));
+
         List<MemoryRankingCandidate> deduplicated =
                 List.copyOf(deduplicationPolicy.deduplicate(query, ranked));
         List<MemoryRankingCandidate> diversified =
                 List.copyOf(diversityPolicy.diversify(query, deduplicated));
-        Selection selection = applyContextBudget(diversified, query.contextBudget());
+        // Form the bounded application pool after ranking, deduplication and diversity.
+        // Capping earlier could leave it underfilled when a later stage removes items.
+        List<MemoryRankingCandidate> candidatePool = diversified.stream()
+                .limit(query.contextBudget().maxCandidateItems())
+                .toList();
+        Selection selection = applyContextBudget(candidatePool, query.contextBudget());
 
         return new FindRelevantMemoriesResult(
                 searchResult.completeness(),
@@ -272,7 +266,8 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
                 memory.sensitivityLevel(),
                 role.orElseThrow(),
                 reasons);
-        return Optional.of(new MemoryRankingCandidate(item, signalsOf(candidate)));
+        return Optional.of(new MemoryRankingCandidate(
+                item, signalsOf(candidate), candidate.evidence()));
     }
 
     private static Set<MemoryRelevanceSignal> signalsOf(MemorySearchCandidate candidate) {
@@ -282,6 +277,12 @@ public final class FindRelevantMemoriesService implements FindRelevantMemoriesUs
         }
         if (candidate.signals().contains(MemorySearchSignal.SEMANTIC_MATCH)) {
             signals.add(MemoryRelevanceSignal.SEMANTIC_RELEVANCE);
+        }
+        if (candidate.signals().contains(MemorySearchSignal.KEYWORD_MATCH)) {
+            signals.add(MemoryRelevanceSignal.KEYWORD_RELEVANCE);
+        }
+        if (candidate.signals().contains(MemorySearchSignal.CATEGORY_MATCH)) {
+            signals.add(MemoryRelevanceSignal.SCOPE_MATCH);
         }
         return signals;
     }

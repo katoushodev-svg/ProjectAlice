@@ -81,6 +81,28 @@ class PostingSearchPipelineTest {
     }
 
     @Test
+    void recordsRelationCandidateGenerationWithoutChangingSearchResult() {
+        // Use a deterministic clock with a fixed elapsed interval.
+        var ticks = new java.util.concurrent.atomic.AtomicLong();
+        var metrics = new CandidateGenerationLatencyMetrics(() -> ticks.getAndAdd(7L));
+        var measuredPipeline = new PostingSearchPipeline(reader, new PostingCandidateAccumulator(),
+                null, null, null, metrics);
+        when(reader.read(eq(MemoryRetrievalPurpose.RELATION_DECISION), any())).thenReturn(
+                readResult(SearchCompleteness.COMPLETE, List.of(
+                        posting(1, null, 0, PostingCandidateAccumulator.TermKind.LEXICAL)), false));
+
+        var result = measuredPipeline.search(MemoryRetrievalPurpose.RELATION_DECISION,
+                List.of(new DynamoDbPostingReader.QueryTerm(1, DIGEST, 0)));
+
+        assertEquals(SearchCompleteness.COMPLETE, result.completeness());
+        assertEquals(1, result.candidates().size());
+        var samples = metrics.samples(CandidateGenerationLatencyMetrics.Purpose.RELATION);
+        assertEquals(1, samples.size());
+        assertEquals(7L, samples.getFirst().durationNanos());
+        assertTrue(metrics.samples(CandidateGenerationLatencyMetrics.Purpose.ANSWER).isEmpty());
+    }
+
+    @Test
     void aggregationCapCannotBeReportedAsComplete() {
         List<PostingCandidateAccumulator.PostingObservation> postings = new ArrayList<>();
         for (int i = 1; i <= PostingCandidateAccumulator.ANSWER_UNIQUE_CANDIDATE_LIMIT + 1; i++) {

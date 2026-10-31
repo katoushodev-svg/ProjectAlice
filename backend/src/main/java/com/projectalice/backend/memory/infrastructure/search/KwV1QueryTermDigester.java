@@ -22,9 +22,11 @@ public final class KwV1QueryTermDigester {
         KwV1Analyzer.Analysis analysis = analyzer.analyzeQuery(query, queryHints);
         List<Integer> keyVersions = digest.readableKeyVersions();
         List<DigestedTerm> result = new ArrayList<>(analysis.terms().size() * keyVersions.size());
-        for (KwV1Analyzer.TermDescriptor term : analysis.terms()) {
+        for (int ordinal = 0; ordinal < analysis.terms().size(); ordinal++) {
+            KwV1Analyzer.TermDescriptor term = analysis.terms().get(ordinal);
             for (int keyVersion : keyVersions) {
                 result.add(new DigestedTerm(
+                        ordinal,
                         keyVersion,
                         digest.digestForRead(keyVersion, KwV1Analyzer.VERSION, term.normalizedTerm()),
                         term.kind(),
@@ -36,8 +38,25 @@ public final class KwV1QueryTermDigester {
 
     /** A content-free descriptor for constructing a Search Posting partition query. */
     public record DigestedTerm(
-            int keyVersion, String termDigest, KwV1Analyzer.TermKind termKind, int weightCode) {
+            int queryTermOrdinal,
+            int keyVersion,
+            String termDigest,
+            KwV1Analyzer.TermKind termKind,
+            int weightCode) {
+
+        /** Backward-compatible constructor for callers without an ordinal. */
+        public DigestedTerm(
+                int keyVersion,
+                String termDigest,
+                KwV1Analyzer.TermKind termKind,
+                int weightCode) {
+            this(0, keyVersion, termDigest, termKind, weightCode);
+        }
+
         public DigestedTerm {
+            if (queryTermOrdinal < 0) {
+                throw new IllegalArgumentException("queryTermOrdinal must be non-negative");
+            }
             if (keyVersion < 1) {
                 throw new IllegalArgumentException("keyVersion must be positive");
             }

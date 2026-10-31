@@ -216,4 +216,48 @@ class MemoryPreferencesControllerTest {
         assertThat(response.body())
                 .contains("\"code\":\"VALIDATION_ERROR\"");
     }
+
+    @Test
+    void patchRejectsNonBooleanValue() throws Exception {
+        for (String body : new String[] {
+                "{\"autoSaveEnabled\":\"true\"}",
+                "{\"autoSaveEnabled\":1}"
+        }) {
+            var response = send(
+                    "PATCH",
+                    body,
+                    "\"memory-preferences-v1\"");
+
+            assertThat(response.statusCode())
+                    .as("body=%s", body)
+                    .isEqualTo(400);
+            assertThat(response.body())
+                    .as("body=%s", body)
+                    .contains("\"code\":\"VALIDATION_ERROR\"");
+        }
+    }
+
+    @Test
+    void patchRejectsEmptyBodyObject() throws Exception {
+        var response = send(
+                "PATCH",
+                "{}",
+                "\"memory-preferences-v1\"");
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body())
+                .contains("\"code\":\"VALIDATION_ERROR\"");
+    }
+
+    @Test
+    void patchRejectsNullValue() throws Exception {
+        var response = send(
+                "PATCH",
+                "{\"autoSaveEnabled\":null}",
+                "\"memory-preferences-v1\"");
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body())
+                .contains("\"code\":\"VALIDATION_ERROR\"");
+    }
 }

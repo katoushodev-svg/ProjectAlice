@@ -5,7 +5,16 @@ import java.util.Objects;
 import java.util.Set;
 
 /** A search hint only; it deliberately carries no memory content. */
-public record MemorySearchCandidate(MemoryId memoryId, long version, Set<MemorySearchSignal> signals) {
+public record MemorySearchCandidate(
+        MemoryId memoryId,
+        long version,
+        Set<MemorySearchSignal> signals,
+        MemorySearchEvidence evidence) {
+
+    public MemorySearchCandidate(
+            MemoryId memoryId, long version, Set<MemorySearchSignal> signals) {
+        this(memoryId, version, signals, MemorySearchEvidence.EMPTY);
+    }
 
     public MemorySearchCandidate {
         Objects.requireNonNull(memoryId, "memoryId must not be null");
@@ -13,5 +22,6 @@ public record MemorySearchCandidate(MemoryId memoryId, long version, Set<MemoryS
             throw new IllegalArgumentException("version must be >= 1");
         }
         signals = signals == null ? Set.of() : Set.copyOf(signals);
+        evidence = evidence == null ? MemorySearchEvidence.EMPTY : evidence;
     }
 }

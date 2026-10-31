@@ -2,6 +2,10 @@ package com.projectalice.backend.conversation.presentation;
 
 import com.projectalice.backend.conversation.application.model.ConversationSendException;
 import com.projectalice.backend.conversation.application.model.InvalidCursorException;
+import com.projectalice.backend.memory.application.InvalidRegisterIdempotencyKeyException;
+import com.projectalice.backend.memory.application.RegisterMemoryIdempotencyKeyRequiredException;
+import com.projectalice.backend.memory.application.InvalidRegisterMemoryRequestException;
+import com.projectalice.backend.memory.application.RegisterIdempotencyUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,6 +38,37 @@ public final class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         String id=requestId(request); Map<String,Object> body=problem(400,"INVALID_CURSOR","Cursorが不正または解釈できません。",id);
         HttpHeaders headers=new HttpHeaders(); headers.setContentType(MediaType.parseMediaType("application/problem+json")); headers.setCacheControl("no-store"); headers.set("X-Request-Id",id);
         return new ResponseEntity<>(body,headers,HttpStatusCode.valueOf(400));
+    }
+
+    @ExceptionHandler({InvalidRegisterIdempotencyKeyException.class,
+            RegisterMemoryIdempotencyKeyRequiredException.class, InvalidRegisterMemoryRequestException.class})
+    ResponseEntity<Map<String,Object>> invalidRegisterRequest(RuntimeException exception,
+            HttpServletRequest request) {
+        String code = exception instanceof RegisterMemoryIdempotencyKeyRequiredException
+                ? "IDEMPOTENCY_KEY_REQUIRED"
+                : exception instanceof InvalidRegisterIdempotencyKeyException
+                        ? "INVALID_IDEMPOTENCY_KEY" : "VALIDATION_ERROR";
+        int status = 400;
+        String id = requestId(request);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/problem+json"));
+        headers.setCacheControl("no-store");
+        headers.set("X-Request-Id", id);
+        return new ResponseEntity<>(problem(status, code, "登録Requestを確認してください。", id), headers,
+                HttpStatusCode.valueOf(status));
+    }
+
+    @ExceptionHandler(RegisterIdempotencyUnavailableException.class)
+    ResponseEntity<Map<String,Object>> registerIdempotencyUnavailable(
+            RegisterIdempotencyUnavailableException exception, HttpServletRequest request) {
+        String id = requestId(request);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/problem+json"));
+        headers.setCacheControl("no-store");
+        headers.set("X-Request-Id", id);
+        return new ResponseEntity<>(problem(503, "SERVICE_UNAVAILABLE",
+                "登録の再試行安全性を確保できません。時間をおいて再試行してください。", id), headers,
+                HttpStatusCode.valueOf(503));
     }
 
     @Override protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex,

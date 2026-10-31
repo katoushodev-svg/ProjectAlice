@@ -25,7 +25,9 @@ class RegisterMemoryServiceTest {
     void registersExplicitMemoryAndDelegatesToRepository() {
         RecordingRepository repository = new RecordingRepository();
         RegisterMemoryService service = new RegisterMemoryService(
-                repository, Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC));
+                repository, Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC),
+                new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of())));
         RegisterMemoryResult result = service.execute(new RegisterMemoryCommand(
                 new MemoryContent("Javaが好き"), MemoryCategory.PREFERENCE, SensitivityLevel.NORMAL));
 
@@ -40,13 +42,157 @@ class RegisterMemoryServiceTest {
     }
 
     @Test
+    void idempotentRegistrationFailsClosedUntilBindingPersistenceExists() {
+        RecordingRepository repository = new RecordingRepository();
+        RegisterMemoryService service = new RegisterMemoryService(repository,
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of())));
+        RegisterMemoryCommand command = command();
+        assertThrows(RegisterIdempotencyUnavailableException.class,
+                () -> service.execute("550e8400-e29b-41d4-a716-446655440000", command));
+        assertEquals(null, repository.saved);
+    }
+
+    @Test
     void rejectsNullCommand() {
         RegisterMemoryService service = new RegisterMemoryService(
-                new RecordingRepository(), Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC));
+                new RecordingRepository(), Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC),
+                new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of())));
         assertThrows(NullPointerException.class, () -> service.execute(null));
     }
 
-    private static final class RecordingRepository implements PersonalMemoryRepository {
+    @Test
+    void doesNotSaveWhenRelationSearchIsIncompleteOrUnavailable() {
+        for (SearchCompleteness completeness : java.util.List.of(
+                SearchCompleteness.PARTIAL, SearchCompleteness.UNAVAILABLE)) {
+            RecordingRepository repository = new RecordingRepository();
+            RegisterMemoryService service = new RegisterMemoryService(repository,
+                    Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate ->
+                            new RelatedMemorySearchResult(completeness, java.util.List.of())));
+
+            RegisterMemoryResult result = service.execute(command());
+
+            assertEquals(completeness == SearchCompleteness.PARTIAL
+                            ? RegisterMemoryResult.Status.RELATION_SEARCH_INCOMPLETE
+                            : RegisterMemoryResult.Status.RELATION_SEARCH_UNAVAILABLE,
+                    result.status());
+            assertEquals(null, repository.saved);
+        }
+    }
+
+    @Test
+    void exactDuplicateReturnsNoChangeWithoutSaving() {
+        RecordingRepository repository = new RecordingRepository();
+        PersonalMemory existing = PersonalMemory.create(new MemoryContent("Javaが好き"),
+                MemoryCategory.PREFERENCE, CaptureType.EXPLICIT, SensitivityLevel.NORMAL,
+                FIXED_INSTANT.atOffset(ZoneOffset.UTC));
+        RegisterMemoryService service = new RegisterMemoryService(repository,
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of(
+                                new RelatedMemorySearchResult.Candidate(existing.memoryId(), existing.version(),
+                                        existing.content(), existing.category(), existing.captureType(),
+                                        existing.sensitivityLevel(), existing.state())))));
+
+        RegisterMemoryResult result = service.execute(command());
+
+        assertEquals(RegisterMemoryResult.Status.NO_CHANGE, result.status());
+        assertEquals(1, result.relationCandidateCount());
+        assertEquals(null, repository.saved);
+    }
+
+    @Test
+    void keywordRelatedButNonIdenticalCandidateRequiresReviewAndDoesNotSave() {
+        PersonalMemory existing = PersonalMemory.create(new MemoryContent("Javaを仕事で使っている"),
+                MemoryCategory.PREFERENCE, CaptureType.EXPLICIT, SensitivityLevel.NORMAL,
+                FIXED_INSTANT.atOffset(ZoneOffset.UTC));
+        RecordingRepository repository = new RecordingRepository() {
+            @Override public Optional<PersonalMemory> findById(MemoryId id) {
+                return existing.memoryId().equals(id) ? Optional.of(existing) : Optional.empty();
+            }
+        };
+        RegisterMemoryService service = new RegisterMemoryService(repository,
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of(
+                                new RelatedMemorySearchResult.Candidate(existing.memoryId(), existing.version(),
+                                        existing.content(), existing.category(), existing.captureType(),
+                                        existing.sensitivityLevel(), existing.state())))));
+
+        assertThrows(RelationReviewPublicationUnavailableException.class, () -> service.execute(command()));
+        assertEquals(null, repository.saved);
+    }
+
+    @Test
+    void changedTargetVersionFailsClosedWithoutReviewDraft() {
+        PersonalMemory searched = PersonalMemory.create(new MemoryContent("Javaを仕事で使っている"),
+                MemoryCategory.PREFERENCE, CaptureType.EXPLICIT, SensitivityLevel.NORMAL,
+                FIXED_INSTANT.atOffset(ZoneOffset.UTC));
+        PersonalMemory changed = PersonalMemory.reconstitute(searched.memoryId(),
+                new MemoryContent("別の内容"), searched.category(), searched.captureType(),
+                searched.sensitivityLevel(), MemoryState.ACTIVE, searched.version() + 1,
+                searched.createdAt(), searched.updatedAt().plusSeconds(1), null);
+        RecordingRepository repository = new RecordingRepository() {
+            @Override public Optional<PersonalMemory> findById(MemoryId id) {
+                return searched.memoryId().equals(id) ? Optional.of(changed) : Optional.empty();
+            }
+        };
+        RegisterMemoryService service = new RegisterMemoryService(repository,
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of(
+                                new RelatedMemorySearchResult.Candidate(searched.memoryId(), searched.version(),
+                                        searched.content(), searched.category(), searched.captureType(),
+                                        searched.sensitivityLevel(), searched.state())))));
+
+        assertThrows(RelationReviewCandidateChangedException.class, () -> service.execute(command()));
+        assertEquals(null, repository.saved);
+    }
+
+    @Test
+    void missingTargetCannotProduceAReviewDraft() {
+        var candidate = new RelatedMemorySearchResult.Candidate(new MemoryId("00000000-0000-4000-8000-000000000001"),
+                3, new MemoryContent("Javaを仕事で使っている"), MemoryCategory.PREFERENCE,
+                CaptureType.EXPLICIT, SensitivityLevel.NORMAL, MemoryState.ACTIVE);
+        RegisterMemoryService service = new RegisterMemoryService(new RecordingRepository(),
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(ignored ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of(candidate))));
+
+        assertThrows(RelationReviewCandidateChangedException.class, () -> service.execute(command()));
+    }
+
+    @Test
+    void relationSearchExceptionIsNotTreatedAsNoMatch() {
+        RecordingRepository repository = new RecordingRepository();
+        RegisterMemoryService service = new RegisterMemoryService(repository,
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate -> {
+                    throw new IllegalStateException("search unavailable");
+                }));
+
+        RegisterMemoryResult result = service.execute(command());
+
+        assertEquals(RegisterMemoryResult.Status.RELATION_SEARCH_UNAVAILABLE, result.status());
+        assertEquals(null, repository.saved);
+    }
+
+    @Test
+    void persistenceFailureAfterAConfirmedNoMatchStillPropagates() {
+        PersonalMemoryRepository failingRepository = new RecordingRepository() {
+            @Override public void save(PersonalMemory memory) {
+                throw new IllegalStateException("save failed");
+            }
+        };
+        RegisterMemoryService service = new RegisterMemoryService(failingRepository,
+                Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC), new MemoryRelationDecisionService(candidate ->
+                        new RelatedMemorySearchResult(SearchCompleteness.COMPLETE, java.util.List.of())));
+
+        assertThrows(IllegalStateException.class, () -> service.execute(command()));
+    }
+
+    private static RegisterMemoryCommand command() {
+        return new RegisterMemoryCommand(new MemoryContent("Javaが好き"),
+                MemoryCategory.PREFERENCE, SensitivityLevel.NORMAL);
+    }
+
+    private static class RecordingRepository implements PersonalMemoryRepository {
         private PersonalMemory saved;
         @Override
         public void save(PersonalMemory memory) { this.saved = memory; }

@@ -3,7 +3,9 @@ package com.projectalice.backend.memory.infrastructure;
 import com.projectalice.backend.memory.application.port.out.AnswerMemorySearchPort;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesService;
 import com.projectalice.backend.memory.application.FindRelevantMemoriesUseCase;
-import com.projectalice.backend.memory.application.MemoryRelevanceRankingPolicy;
+import com.projectalice.backend.memory.application.RegisterMemoryService;
+import com.projectalice.backend.memory.application.RegisterMemoryUseCase;
+import com.projectalice.backend.memory.application.WeightedMemoryRelevanceRankingPolicy;
 import com.projectalice.backend.memory.application.MemoryDeduplicationPolicy;
 import com.projectalice.backend.memory.application.MemoryDiversityPolicy;
 import com.projectalice.backend.memory.application.port.out.MemoryResetPointRepository;
@@ -15,19 +17,23 @@ import com.projectalice.backend.memory.application.ValidateMemorySelectionUseCas
 import com.projectalice.backend.memory.infrastructure.persistence.dynamodb.DynamoDbMemoryResetPointRepository;
 import com.projectalice.backend.memory.infrastructure.persistence.dynamodb.DynamoDbPersonalMemoryRepository;
 import com.projectalice.backend.memory.infrastructure.search.DynamoDbAnswerMemorySearchAdapter;
+import com.projectalice.backend.memory.infrastructure.search.CandidateGenerationLatencyMetrics;
 import com.projectalice.backend.memory.infrastructure.search.MemorySearchTermDigest;
 import com.projectalice.backend.memory.infrastructure.search.dynamodb.DynamoDbMemorySearchIntentStore;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.time.Clock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
 /** Infrastructure wiring for answer search. Key material is confined to the digest capability. */
 @Configuration(proxyBeanMethods = false)
+@Import(RelationSearchConfiguration.class)
 public class MemorySearchConfiguration {
     private static final String SEARCH_PROBE = "xByOEBw-3aY0WaUv7Lo4rcHxEp6UonFD6Ht-t3RQo-Q";
 
@@ -38,6 +44,10 @@ public class MemorySearchConfiguration {
 
     @Bean MemoryContextPayloadSerializer memoryContextPayloadSerializer() {
         return new MemoryContextPayloadSerializer();
+    }
+
+    @Bean CandidateGenerationLatencyMetrics candidateGenerationLatencyMetrics() {
+        return new CandidateGenerationLatencyMetrics();
     }
 
     @Bean PersonalMemoryRepository personalMemoryRepository(DynamoDbClient client,
@@ -53,12 +63,16 @@ public class MemorySearchConfiguration {
     @Bean FindRelevantMemoriesUseCase findRelevantMemoriesUseCase(AnswerMemorySearchPort searchPort,
             PersonalMemoryRepository memories, TokenEstimator estimator, MemoryContextPayloadSerializer serializer,
             MemoryResetPointRepository resetPoints) {
-        // Ranking, deduplication and diversity policies remain deliberately conservative until their
-        // acceptance criteria are finalized; this wiring does not introduce new ranking behavior.
+        // Use the initial provider-neutral ranking policy. Deduplication and diversity remain unchanged.
         return new FindRelevantMemoriesService(searchPort, memories,
-                MemoryRelevanceRankingPolicy.preservingInputOrder(),
+                new WeightedMemoryRelevanceRankingPolicy(),
                 MemoryDeduplicationPolicy.preservingCandidates(),
                 MemoryDiversityPolicy.preservingCandidates(), estimator, serializer, resetPoints);
+    }
+
+    @Bean RegisterMemoryUseCase registerMemoryUseCase(PersonalMemoryRepository memories, Clock clock,
+            com.projectalice.backend.memory.application.MemoryRelationDecisionUseCase relationDecision) {
+        return new RegisterMemoryService(memories, clock, relationDecision);
     }
 
     @Bean MemorySearchTermCapability memorySearchTermCapability(
@@ -83,9 +97,9 @@ public class MemorySearchConfiguration {
 
     @Bean AnswerMemorySearchPort answerMemorySearchPort(DynamoDbClient client,
             @Value("${ALICE_MEMORY_DYNAMODB_TABLE_NAME:project-alice-memory-local}") String table,
-            MemorySearchTermCapability capability) {
+            MemorySearchTermCapability capability, CandidateGenerationLatencyMetrics latencyMetrics) {
         return new DynamoDbAnswerMemorySearchAdapter(client, table, capability.digest(),
-                new DynamoDbMemorySearchIntentStore(client, table));
+                new DynamoDbMemorySearchIntentStore(client, table), latencyMetrics);
     }
 
     private static MapBuilder parseKeys(String encoded) {

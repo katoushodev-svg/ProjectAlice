@@ -142,7 +142,7 @@ public final class RankingEvaluationDataset {
         TemporalRole answerRole = purpose == SearchPurpose.ANSWER_HISTORICAL ? TemporalRole.HISTORICAL : TemporalRole.CURRENT;
         MemoryState requiredState = purpose == SearchPurpose.ANSWER_HISTORICAL ? MemoryState.RESOLVED : MemoryState.ACTIVE;
         List<MemoryFixture> memories = new ArrayList<>(200);
-        memories.add(fixture(id + "-m001", subject + " の検証用決定。", index, 1, requiredState, SensitivityLevel.NORMAL,
+        memories.add(fixture(id + "-m001", requiredContent(category, subject, purpose, index), index, 1, requiredState, SensitivityLevel.NORMAL,
                 answerRole, Eligibility.ELIGIBLE, EligibilityReason.ALLOWED, Relevance.REQUIRED, SafetyCondition.NONE, false, true));
         memories.add(fixture(id + "-m002", subject + " は ModuleB と連携する。", index, 2, MemoryState.ACTIVE,
                 SensitivityLevel.NORMAL, TemporalRole.CURRENT, Eligibility.ELIGIBLE, EligibilityReason.ALLOWED,
@@ -167,8 +167,9 @@ public final class RankingEvaluationDataset {
         for (int candidate = 5; candidate <= 200; candidate++) {
             Relevance relevance = candidate == 5 && index % 3 == 0 ? Relevance.REQUIRED : Relevance.IRRELEVANT;
             String content = relevance == Relevance.REQUIRED
-                    ? subject + " の検証用決定を補足する必須情報。"
-                    : "無関係な合成候補 " + candidate + " for " + subject + "。";
+                    ? requiredContent(category, subject, purpose, index) + " 補足記録。"
+                    : "試験用プロジェクトAL-%03d の無関係な合成候補 %d。"
+                            .formatted(index + candidate + 300, candidate);
             memories.add(fixture(id + "-m%03d".formatted(candidate), content, index, candidate,
                     MemoryState.ACTIVE, SensitivityLevel.NORMAL, TemporalRole.CURRENT,
                     Eligibility.ELIGIBLE, EligibilityReason.ALLOWED, relevance, SafetyCondition.NONE, false, true));
@@ -187,6 +188,36 @@ public final class RankingEvaluationDataset {
         return new Scenario(id, DATASET_VERSION, GENERATOR_VERSION, group, purpose, category, query, memories,
                 recallTargets, unsafe == SafetyCondition.NONE ? List.of() : List.of(id + "-m004"),
                 requiredIds, relatedIds);
+    }
+
+    private static String requiredContent(String category, String subject,
+            SearchPurpose purpose, int index) {
+        boolean historical = purpose == SearchPurpose.ANSWER_HISTORICAL;
+        return switch (category) {
+            case "ja-orthography" -> subject + (historical
+                    ? " の以前の担当者は田中です。"
+                    : " の現在の担当者は佐藤です。");
+            case "mixed-alphanumeric" ->
+                    subject + " の relation decision は ModuleB と連携することです。";
+            case "paraphrase" ->
+                    subject + " について以前に決めたことは、APIのタイムアウトを3秒にすることです。";
+            case "homonym" ->
+                    subject + " の記録です。対象モジュールはModuleBで、別対象とは別管理です。";
+            case "negation" ->
+                    subject + " の設定は変更していません。タイムアウトは3秒のままです。";
+            case "temporal" -> historical
+                    ? subject + " の以前の期限は2026年10月31日です。"
+                    : subject + " の現在の期限は2026年11月30日です。以前の期限は2026年10月31日でした。";
+            case "sensitive" ->
+                    subject + " で参照を許可された情報範囲は公開APIの仕様のみです。";
+            case "resolved" -> historical
+                    ? subject + " の以前の状態は対応中でした。"
+                    : subject + " の現在状態は稼働中です。";
+            case "deleted" ->
+                    subject + " の有効な記録は、確認手順が文書化されていることです。";
+            default ->
+                    subject + " の検証用記録は、APIタイムアウトを3秒に設定することです。";
+        };
     }
 
     private static MemoryFixture fixture(String id, String content, int scenarioIndex, int ordinal,

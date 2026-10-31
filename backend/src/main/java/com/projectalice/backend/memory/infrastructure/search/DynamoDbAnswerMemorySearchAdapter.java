@@ -30,26 +30,40 @@ public final class DynamoDbAnswerMemorySearchAdapter implements AnswerMemorySear
     private final Optional<MemorySearchTermDigest> digest;
     private final KwV1QueryTermDigester termDigester;
     private final DynamoDbMemorySearchIntentStore intents;
+    private final CandidateGenerationLatencyMetrics latencyMetrics;
 
     public DynamoDbAnswerMemorySearchAdapter(DynamoDbClient client, String tableName,
             Optional<MemorySearchTermDigest> digest, DynamoDbMemorySearchIntentStore intents) {
+        this(client, tableName, digest, intents, new CandidateGenerationLatencyMetrics());
+    }
+
+    public DynamoDbAnswerMemorySearchAdapter(DynamoDbClient client, String tableName,
+            Optional<MemorySearchTermDigest> digest, DynamoDbMemorySearchIntentStore intents,
+            CandidateGenerationLatencyMetrics latencyMetrics) {
         this.client = Objects.requireNonNull(client, "client must not be null");
         this.tableName = Objects.requireNonNull(tableName, "tableName must not be null");
         if (tableName.isBlank()) throw new IllegalArgumentException("tableName must not be blank");
         this.digest = Objects.requireNonNull(digest, "digest must not be null");
         this.intents = Objects.requireNonNull(intents, "intents must not be null");
+        this.latencyMetrics = Objects.requireNonNull(latencyMetrics, "latencyMetrics must not be null");
         this.termDigester = digest.map(key -> new KwV1QueryTermDigester(new KwV1Analyzer(), key)).orElse(null);
     }
 
     @Override
     public AnswerMemorySearchResult findCandidates(MemoryRetrievalQuery query) {
+        return latencyMetrics.measure(CandidateGenerationLatencyMetrics.Purpose.ANSWER,
+                () -> findCandidatesInternal(query), result -> result == null ? null : result.completeness());
+    }
+
+    private AnswerMemorySearchResult findCandidatesInternal(MemoryRetrievalQuery query) {
         Objects.requireNonNull(query, "query must not be null");
         if (query.purpose() != MemoryRetrievalPurpose.ANSWER_CURRENT || digest.isEmpty())
             return AnswerMemorySearchResult.unavailable();
         try {
             boolean partial = intents.hasPendingIntents();
-            var terms = termDigester.digestQuery(query.currentUserContent(), query.entityHints());
-            Map<String, Long> candidates = new LinkedHashMap<>();
+            var terms = canonicalTerms(
+                    termDigester.digestQuery(query.currentUserContent(), query.entityHints()));
+            Map<String, CandidateAccumulator> candidates = new LinkedHashMap<>();
             java.util.Set<String> conflictingVersions = new java.util.HashSet<>();
             int postingCount = 0;
             boolean truncated = false;
@@ -77,11 +91,24 @@ public final class DynamoDbAnswerMemorySearchAdapter implements AnswerMemorySear
                         partial = true;
                         continue;
                     }
-                    Long previousVersion = candidates.putIfAbsent(memoryId, version);
-                    if (previousVersion != null && previousVersion != version) {
+                    int postingWeight;
+                    try {
+                        postingWeight = validatedPostingWeight(posting, term.keyVersion());
+                    } catch (RuntimeException invalidPosting) {
+                        partial = true;
+                        continue;
+                    }
+
+                    CandidateAccumulator accumulator = candidates.get(memoryId);
+                    if (accumulator == null) {
+                        accumulator = new CandidateAccumulator(version);
+                        candidates.put(memoryId, accumulator);
+                    } else if (accumulator.version != version) {
                         conflictingVersions.add(memoryId);
                         partial = true;
+                        continue;
                     }
+                    accumulator.record(term.queryTermOrdinal(), postingWeight);
                     if (candidates.size() > MAX_UNIQUE_CANDIDATES) { truncated = true; break outer; }
                 }
                 if (response.lastEvaluatedKey() != null && !response.lastEvaluatedKey().isEmpty()) partial = true;
@@ -91,13 +118,79 @@ public final class DynamoDbAnswerMemorySearchAdapter implements AnswerMemorySear
             for (var entry : candidates.entrySet()) {
                 if (conflictingVersions.contains(entry.getKey())) continue;
                 if (result.size() == MAX_UNIQUE_CANDIDATES) break;
+                CandidateAccumulator accumulator = entry.getValue();
+                int coverage = accumulator.termWeights.size();
+                int weightSum = accumulator.termWeights.values().stream()
+                        .mapToInt(Integer::intValue)
+                        .sum();
                 result.add(new MemorySearchCandidate(
-                        new com.projectalice.backend.memory.domain.MemoryId(entry.getKey()), entry.getValue(),
-                        Set.of(MemorySearchSignal.KEYWORD_MATCH)));
+                        new com.projectalice.backend.memory.domain.MemoryId(entry.getKey()),
+                        accumulator.version,
+                        Set.of(MemorySearchSignal.KEYWORD_MATCH),
+                        new com.projectalice.backend.memory.application.MemorySearchEvidence(
+                                coverage, weightSum)));
             }
             return new AnswerMemorySearchResult(partial ? SearchCompleteness.PARTIAL : SearchCompleteness.COMPLETE, result);
         } catch (RuntimeException unavailable) {
             return AnswerMemorySearchResult.unavailable();
+        }
+    }
+
+    /**
+     * A digest partition can be reached by descriptors that normalize to the same term.
+     * Query it once per key version, retaining the strongest descriptor so one posting
+     * cannot inflate distinct-term coverage.
+     */
+    private static List<KwV1QueryTermDigester.DigestedTerm> canonicalTerms(
+            List<KwV1QueryTermDigester.DigestedTerm> terms) {
+        Map<String, KwV1QueryTermDigester.DigestedTerm> canonical = new LinkedHashMap<>();
+        for (var term : terms) {
+            String identity = term.keyVersion() + ":" + term.termDigest();
+            canonical.merge(identity, term,
+                    (left, right) -> right.weightCode() > left.weightCode() ? right : left);
+        }
+        return List.copyOf(canonical.values());
+    }
+
+    /**
+     * Validate the posting's own descriptor. The partition key already binds the
+     * digest; termKind is not compared to the query descriptor because equal normalized
+     * terms can be emitted under different analyzer kinds.
+     */
+    private static int validatedPostingWeight(
+            Map<String, AttributeValue> posting, int expectedKeyVersion) {
+        if (!"MEMORY_SEARCH_POSTING".equals(requiredString(posting, "itemType"))) {
+            throw new IllegalStateException("unexpected posting itemType");
+        }
+        if (requiredNumber(posting, "schemaVersion") != 1) {
+            throw new IllegalStateException("unsupported posting schemaVersion");
+        }
+        if (!KwV1Analyzer.VERSION.equals(requiredString(posting, "analyzerVersion"))) {
+            throw new IllegalStateException("unexpected posting analyzerVersion");
+        }
+        if (requiredNumber(posting, "tokenKeyVersion") != expectedKeyVersion) {
+            throw new IllegalStateException("unexpected posting tokenKeyVersion");
+        }
+
+        KwV1Analyzer.TermKind kind =
+                KwV1Analyzer.TermKind.valueOf(requiredString(posting, "termKind"));
+        int weight = Math.toIntExact(requiredNumber(posting, "weightCode"));
+        if (weight != kind.weightCode()) {
+            throw new IllegalStateException("posting weightCode does not match termKind");
+        }
+        return weight;
+    }
+
+    private static final class CandidateAccumulator {
+        private final long version;
+        private final Map<Integer, Integer> termWeights = new LinkedHashMap<>();
+
+        private CandidateAccumulator(long version) {
+            this.version = version;
+        }
+
+        private void record(int queryTermOrdinal, int weight) {
+            termWeights.merge(queryTermOrdinal, weight, Math::max);
         }
     }
 

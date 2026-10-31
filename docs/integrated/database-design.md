@@ -4056,12 +4056,16 @@ Relation KeyをDevice Credential、Cursor、Guard、Search Term、Idempotency、
   "versions": {
     "6": {
       "state": "DECRYPT_ONLY",
+      "noncePrefix": "A1B2Cw",
+      "nextNonceCounter": 42,
       "activeReviewCount": 3,
       "preparingReferenceCount": 0,
       "cleanupPendingCount": 0
     },
     "7": {
       "state": "WRITE_ACTIVE",
+      "noncePrefix": "B3C4DQ",
+      "nextNonceCounter": 0,
       "activeReviewCount": 8,
       "preparingReferenceCount": 1,
       "cleanupPendingCount": 0
@@ -4153,6 +4157,25 @@ AADは少なくともPurpose、Schema Version、Relation Review ID、Review Vers
 ### 42.11 Retention, Observability and Required Tests
 
 Key Controlと参照中VersionにTTLを設定しない。Reference ItemはCiphertext CleanupとCount解放完了後だけ削除する。TTL、Review期限、ProviderからのKey不存在またはProcess RestartだけをCount解放の証拠にしない。
+
+### 42.12 Accepted Cryptographic Suite and Nonce Allocation
+
+| Item | Accepted Decision |
+|---|---|
+| AEAD | AES-256-GCM (`AES/GCM/NoPadding`) |
+| Key | Relation Purpose専用の256-bit AES key。Version間でKey Materialを再利用しない |
+| Nonce | 96-bit。Key Versionごとの32-bit random prefix + 64-bit monotonic counter |
+| Nonce allocation | Key Controlの`WRITE_ACTIVE`条件付きAtomic Incrementで一度だけ予約。暗号化失敗後もCounterを戻さない |
+| Counter exhaustion | signed 64-bit最大値で当該Versionの新規暗号化をFail Closedにし、新Key VersionへのRotationを要求 |
+| Authentication Tag | 128-bit。JCEの標準GCM形式でCiphertext末尾へ含める |
+| Envelope | DynamoDBでは`ciphertext`、`nonce`、`aadSchemaVersion`、`stateKeyVersion`を別属性で保持する。TagはCiphertextから分離しない |
+| AAD | Schema Version、固定Purpose Code、Canonical UUID bytes、Review Version、Key Version、Source Operation Code、Payload Kind Code、Target OrdinalをBig Endian固定長で符号化 |
+
+Prefixは各Key VersionをKey Controlへ初期登録する時にCSPRNGで一度だけ生成する。CounterはKey Control上の条件付き更新で採番するため、複数Backend間でも同一Key Version内のNonce再利用を防ぐ。予約後のプロセス停止はCounterの欠番となり、再利用にはならない。Key Versionを再利用する運用は禁止する。
+
+Keyは外部Secret Boundaryで生成・保管し、Relation Purposeを指定して取得する。開発環境にも固定鍵、通常設定値、Memory Search鍵またはテスト鍵を本番Providerとして使わない。Providerが返すKeyはAES-256でなければ暗号化を拒否する。ProviderのSecret Handleは外部Provider内部だけに保持し、DatabaseにはVersionとContent-free Count / Stateのみを保存する。Rotation後は新Versionだけで暗号化し、既存Reviewの復号にはEnvelopeのVersionと一致するDecrypt Keyだけを使う。参照数が残るVersionを廃止しない。
+
+この決定は既存JCE実装のAES-GCM、96-bit Nonce、128-bit Tagを維持し、Nonce生成だけをランダム毎回方式からVersion別Atomic Counter方式へ確定する。Key ControlのNonce Prefix / Counter属性を追加する。Review公開、Global Active Count、Key ReferenceおよびIdempotency Bindingの同一Transaction要件とSection 45のLedger上限は変更しない。これらのResourceを含むTransaction参加者が未実装の間、Key Referenceを`ACTIVE`へ公開する操作とActive Count変更は実行しない。
 
 必須Test:
 

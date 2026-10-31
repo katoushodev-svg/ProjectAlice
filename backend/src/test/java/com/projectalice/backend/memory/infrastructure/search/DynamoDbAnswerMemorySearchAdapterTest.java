@@ -39,7 +39,14 @@ class DynamoDbAnswerMemorySearchAdapterTest {
             if (pk.equals(targetPk)) {
                 candidateQueries.incrementAndGet();
                 return QueryResponse.builder().items(List.of(Map.of(
-                        "memoryId", s(MEMORY_ID), "semanticVersion", n("1")))).build();
+                        "itemType", s("MEMORY_SEARCH_POSTING"),
+                        "schemaVersion", n("1"),
+                        "memoryId", s(MEMORY_ID),
+                        "analyzerVersion", s("KW_V1"),
+                        "tokenKeyVersion", n("1"),
+                        "termKind", s("LEXICAL"),
+                        "weightCode", n("4"),
+                        "semanticVersion", n("1")))).build();
             }
             return QueryResponse.builder().items(List.of()).build();
         }, request -> GetItemResponse.builder().item(Map.of(
@@ -48,8 +55,10 @@ class DynamoDbAnswerMemorySearchAdapterTest {
                 "activeSemanticVersion", n("1"), "tokenKeyVersion", n("1"),
                 "projectionDigest", s("A".repeat(43)), "projectionDigestKeyVersion", n("1"),
                 "fallbackRequired", AttributeValue.builder().bool(false).build())).build());
+        AtomicInteger ticks = new AtomicInteger();
+        var latencyMetrics = new CandidateGenerationLatencyMetrics(() -> ticks.getAndAdd(5));
         var adapter = new DynamoDbAnswerMemorySearchAdapter(client, "memories", Optional.of(digest),
-                new DynamoDbMemorySearchIntentStore(client, "memories"));
+                new DynamoDbMemorySearchIntentStore(client, "memories"), latencyMetrics);
 
         var result = adapter.findCandidates(query());
 
@@ -58,21 +67,35 @@ class DynamoDbAnswerMemorySearchAdapterTest {
         assertEquals(MEMORY_ID, result.candidates().getFirst().memoryId().value());
         assertEquals(1, candidateQueries.get());
         assertTrue(result.candidates().getFirst().signals().contains(MemorySearchSignal.KEYWORD_MATCH));
+        assertEquals(
+                1,
+                result.candidates().getFirst().evidence().distinctTermCoverage());
+        assertEquals(
+                4,
+                result.candidates().getFirst().evidence().termWeightSum());
+        var samples = latencyMetrics.samples(CandidateGenerationLatencyMetrics.Purpose.ANSWER);
+        assertEquals(1, samples.size());
+        assertEquals(5L, samples.getFirst().durationNanos());
+        assertEquals(CandidateGenerationLatencyMetrics.Outcome.COMPLETE, samples.getFirst().outcome());
     }
 
     @Test
     void missingKeyCapabilityReturnsUnavailableWithoutSearching() {
         AtomicInteger queries = new AtomicInteger();
+        AtomicInteger ticks = new AtomicInteger();
+        var latencyMetrics = new CandidateGenerationLatencyMetrics(() -> ticks.getAndAdd(5));
         DynamoDbClient client = client(request -> { queries.incrementAndGet(); return QueryResponse.builder().build(); },
                 request -> GetItemResponse.builder().build());
         var adapter = new DynamoDbAnswerMemorySearchAdapter(client, "memories", Optional.empty(),
-                new DynamoDbMemorySearchIntentStore(client, "memories"));
+                new DynamoDbMemorySearchIntentStore(client, "memories"), latencyMetrics);
 
         var result = adapter.findCandidates(query());
 
         assertEquals(SearchCompleteness.UNAVAILABLE, result.completeness());
         assertTrue(result.candidates().isEmpty());
         assertEquals(0, queries.get());
+        assertEquals(CandidateGenerationLatencyMetrics.Outcome.UNAVAILABLE,
+                latencyMetrics.samples(CandidateGenerationLatencyMetrics.Purpose.ANSWER).getFirst().outcome());
     }
 
     @Test

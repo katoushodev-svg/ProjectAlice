@@ -26,7 +26,7 @@
 | 観点 | 現在地 | 製造完了までの残り |
 |---|---|---|
 | Phase 1 Conversation | FIP-001〜008完了、FIP-009〜012未実装 | FIP-009〜012、Phase 1レビュー・テスト・統合判定 |
-| Phase 2 Personal Memory | 設計完了、製造未着手 | 正式な製造単位に沿う実装、レビュー、テスト、Phase統合判定 |
+| Phase 2 Personal Memory | 設計完了、製造中（一部実装・Phase品質ゲート未通過。詳細は5.1） | 正式な製造単位の登録、未実装項目の実装、レビュー、受け入れテスト、Phase統合判定 |
 | Phase 3 Tools / External Services | 設計完了、製造未着手 | 正式な製造単位に沿う実装、レビュー、テスト、Phase統合判定 |
 | Phase 4 Agent / PC / Browser / Application / Voice | 設計完了、製造未着手 | 正式な製造単位に沿う実装、レビュー、テスト、Phase統合判定 |
 | 全体統合・最終検証 | 未着手 | Cross-Phase Integration、E2E、安全性、アクセシビリティ、性能および最終完了承認 |
@@ -41,7 +41,7 @@
 |---:|---|---|---|---|---|
 | 0 | Phase 0 設計・基盤構築 | 設計、Phase間整合性確認、Final Design Reviewを完了し、実装を承認する。 | ✅ 完了 | — | Phase 1〜4の製造は承認済み設計に従う。 |
 | 1 | Phase 1 Conversation | 自然で一貫した会話、AI Provider連携、Conversation Historyの保存・参照、Alice人格設定、基本応答を成立させる。 | 🔵 製造中 | Phase 0完了。FIPは後述の順序で管理する。 | FIP-006〜012を順次実施し、Phase 1品質ゲートへ進む。 |
-| 2 | Phase 2 Personal Memory | ユーザー管理可能なMemoryの保存・更新・参照・削除を通じ、ユーザーに合わせた回答を可能にする。 | ⚪ 設計完了／製造未着手 | Phase 1のConversation Historyとの責務分離を維持する。MemoryはPermission、Approval、Execution Authorityの代替にしない。 | 正式な製造計画に基づく実装開始、レビュー、テスト、Phase統合判定。 |
+| 2 | Phase 2 Personal Memory | ユーザー管理可能なMemoryの保存・更新・参照・削除を通じ、ユーザーに合わせた回答を可能にする。 | 🔵 製造中（一部実装。5.1参照） | Phase 1のConversation Historyとの責務分離を維持する。MemoryはPermission、Approval、Execution Authorityの代替にしない。 | 5.1の未実装・要確認項目について製造単位を承認・登録し、実装、レビュー、受け入れテスト、Phase統合判定を行う。 |
 | 3 | Phase 3 Tools / External Services | 外部サービスの情報取得・利用を安全に拡張し、初期優先ConnectorとしてApple Calendarを利用可能にする。 | ⚪ 設計完了／製造未着手 | Tool SelectionとApprovalを分離する。外部サービス連携は限定的で明確なConnector/APIを利用する。 | 正式な製造計画に基づく実装開始、レビュー、テスト、Phase統合判定。 |
 | 4 | Phase 4 Agent / PC / Browser / Application / Voice | Goal理解からPlan、Execute、Observe、EvaluateまでのAgent Cycleと、PC・Browser・Application・Voiceの一貫した体験を実現する。 | ⚪ 設計完了／製造未着手 | Goal／AI ProposalはExecution Authorityではない。Memory、Permission、Approval、Risk、Execution Authorityを分離する。 | 正式な製造計画に基づく実装開始、レビュー、テスト、Phase統合判定。 |
 | 5 | 全体統合 | Phase間の責務境界および連携が、正式設計に対して整合することを確認する。 | ⏳ 未着手 | Phase 1〜4の製造完了と各Phaseの品質ゲート通過。 | Cross-Phase Integration判定。 |
@@ -82,9 +82,29 @@ FIP-006 ✅ → FIP-007 ✅ → FIP-008 ✅ → FIP-009 ⚪ → FIP-010 ⚪ → 
 
 | Phase | 設計状態 | 製造状態 | 製造順序／依存関係として管理する事項 | スコープ境界（必須確認） | 次の正式アクション |
 |---|---|---|---|---|---|
-| Phase 2 Personal Memory | ✅ 設計完了 | ⚪ 未着手 | Phase 1 Conversationと独立した責務として実装・統合する。Phase 2内の製造単位と順序は、承認済み実装計画で確定したものを登録する。 | Conversation HistoryとPersonal Memoryを混同しない。MemoryをPermission、Approval、Execution Authorityに転用しない。 | 製造開始時に承認済み実装計画の単位、依存関係、テスト根拠を台帳へ登録する。 |
+| Phase 2 Personal Memory | ✅ 設計完了 | 🔵 一部実装（5.1参照） | Phase 1 Conversationと独立した責務として実装・統合する。Phase 2内の製造単位と順序は、承認済み実装計画で確定したものを登録する。 | Conversation HistoryとPersonal Memoryを混同しない。MemoryをPermission、Approval、Execution Authorityに転用しない。 | 承認済み実装計画の単位、依存関係、テスト根拠を台帳へ登録する（未登録）。 |
 | Phase 3 Tools / External Services | ✅ 設計完了 | ⚪ 未着手 | Conversationを起点とするTool Selection、Connector/API、結果の流れを、Approvalと分離して実装・統合する。初期優先ConnectorはApple Calendar。Phase内の製造単位と順序は、承認済み実装計画で確定したものを登録する。 | Tool SelectionはApprovalではない。選択のみを根拠に許可が必要な操作を実行しない。 | 製造開始時に承認済み実装計画の単位、依存関係、テスト根拠を台帳へ登録する。 |
 | Phase 4 Agent / PC / Browser / Application / Voice | ✅ 設計完了 | ⚪ 未着手 | Goal → Plan → Execute → Observe → Evaluate（必要に応じ再計画）を、正式な権限境界の下で実装・統合する。Phase内の製造単位と順序は、承認済み実装計画で確定したものを登録する。 | GoalやAI ProposalをExecution Authorityと扱わない。Memory、Permission、Approval、Risk、Execution Authorityを分離する。 | 製造開始時に承認済み実装計画の単位、依存関係、テスト根拠を台帳へ登録する。 |
+
+### 5.1 Phase 2 実装状況（2026-10-23確認、ブランチ `fix/phase2-memory-preferences-alignment`、HEAD `8e84158`）
+
+> 注記：製造単位ID（FIP等）は承認済み実装計画が参照できないため登録していない。完了（✅）とする項目はなく、Phase 2品質ゲート（G2）は未通過。台帳の旧記載「製造未着手」は、Phase 2のコミット履歴（`29b6cda`〜`8e84158`）とコード・テストの存在と矛盾していたため訂正した。
+> テスト合格は、`com.projectalice.backend.memory` 配下の `*Test` 238件（失敗0）と `SendMessageUseCaseMemoryIntegrationTest` 8件（失敗0）の実行結果に限る。`*IT`（DynamoDB Local必須）は未実行。
+
+| 機能 | 状態 | 根拠 |
+|---|---|---|
+| 記憶の登録 | 実装済み・対象テスト合格確認（Application層まで） | `RegisterMemoryService`、`RegisterMemoryServiceTest`、`PersonalMemoryTest`。公開APIは未確認 |
+| 自動記憶生成 | 未実装 | memory配下に自動生成の実装なし（`CaptureType` の列挙のみ）。仕様の実行順序は `memory-design.md` で後続節に委ねられており、要確認 |
+| キーワード検索 | 実装済み・対象テスト合格確認 | `PostingSearchPipeline`、`DynamoDbAnswerMemorySearchAdapter` ほか。DynamoDB実機を使う `*IT` は未実行 |
+| ランキングと候補選択 | 一部実装 | `MemoryRelevanceRankingPolicy`、`MemoryDeduplicationPolicy`、`MemoryDiversityPolicy` のテスト合格。ADR-018の重み・閾値の正式決定と評価基準（Precision@8 85%等）の充足は未確認。test-scopeの比較実験（`evaluation/`）は本番ランキングの採用根拠ではない |
+| 会話フローからの検索・コンテキスト注入 | 実装済み・対象テスト合格確認（Mock/インメモリ範囲） | `SendMessageUseCase`、`SendMessageUseCaseMemoryIntegrationTest`。実DynamoDB・実AI経由のE2Eは未確認 |
+| Preferences取得・更新と回答用ゲート | 実装済み・対象テスト合格確認 | `MemoryPreferencesController`（GET/PATCH `/api/v1/memory-preferences`）、`MemoryPreferencesControllerTest`、`SendMessageUseCaseMemoryIntegrationTest`。`DynamoDbMemoryPreferencesRepositoryIT` は未実行 |
+| 記憶の管理・削除 | 未実装 | Memoryの更新・削除用のController／UseCaseなし（登録・Preferences以外のAPIなし）。ResetPointはReadのみ確認 |
+| バックアップ・復元 | 未実装 | memory配下に該当実装なし |
+| Context BudgetとToken Estimator | 実装済み・対象テスト合格確認 | `MemoryContextBudget`、`JTokkitTokenEstimator`、各テスト |
+| Phase 2全体の受け入れテスト | 未実装・要確認 | Acceptance Criteriaの正式な閾値と評価データは未確定（`memory-design.md` の評価節を参照） |
+
+次の製造単位は、承認済み実装計画がないため、未実装・要確認の項目（削除、登録API、自動記憶生成、ランキング採用判断、受け入れテスト）から承認を得て登録する。
 
 ## 6. レビュー・テスト・統合・最終ゲート台帳
 

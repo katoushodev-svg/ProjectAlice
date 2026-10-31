@@ -3,6 +3,7 @@ package com.projectalice.backend.memory.evaluation;
 import static com.projectalice.backend.memory.evaluation.RankingEvaluationDataset.Group;
 import static com.projectalice.backend.memory.evaluation.RankingEvaluationDataset.Relevance;
 
+import com.projectalice.backend.memory.infrastructure.search.CandidateGenerationLatencyMetrics;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -42,6 +43,13 @@ public final class RankingEvaluationHarness {
 
     public Report evaluate(List<RankingEvaluationDataset.Scenario> dataset,
             Map<String, StageResults> outputs, Stage stage) {
+        return evaluate(dataset, outputs, stage, null);
+    }
+
+    /** Adds runtime process metrics when supplied; synthetic scenario execution is not latency evidence. */
+    public Report evaluate(List<RankingEvaluationDataset.Scenario> dataset,
+            Map<String, StageResults> outputs, Stage stage,
+            CandidateGenerationLatencyMetrics latencyMetrics) {
         RankingEvaluationDataset.validate(dataset);
         Objects.requireNonNull(outputs);
         Objects.requireNonNull(stage);
@@ -89,7 +97,7 @@ public final class RankingEvaluationHarness {
         List<String> underfilled = rows.stream().filter(row -> row.stage() == Stage.FINAL_CONTEXT
                 && row.group() == Group.ANSWER_CURRENT_HISTORICAL && row.precision().denominator() == 0)
                 .map(ScenarioResult::scenarioId).toList();
-        List<TargetResult> targets = targets(dataset, rows, allSafety, stage, missing, underfilled);
+        List<TargetResult> targets = targets(dataset, rows, allSafety, stage, missing, underfilled, latencyMetrics);
         return new Report(List.copyOf(rows), missing, Map.copyOf(categoryRecall), Map.copyOf(groupRecall), Map.copyOf(purposeRecall),
                 overall, precision, List.copyOf(underfilled), List.copyOf(allSafety), List.copyOf(targets));
     }
@@ -113,7 +121,7 @@ public final class RankingEvaluationHarness {
 
     private static List<TargetResult> targets(List<RankingEvaluationDataset.Scenario> dataset,
             List<ScenarioResult> rows, List<String> safety, Stage stage, List<String> missing,
-            List<String> underfilledPrecision) {
+            List<String> underfilledPrecision, CandidateGenerationLatencyMetrics latencyMetrics) {
         List<TargetResult> result = new ArrayList<>();
         if (stage == Stage.CANDIDATE_POOL) {
             result.add(target("Required Memory Recall@40 >= 95%", metricDecision(filter(rows, Group.ANSWER_CURRENT_HISTORICAL), .95,
@@ -129,21 +137,59 @@ public final class RankingEvaluationHarness {
         }
         Metric answerPrecision = aggregateMetric(rows.stream().filter(r -> r.group() == Group.ANSWER_CURRENT_HISTORICAL
                 && r.precision().denominator() > 0).toList(), true);
+        boolean insufficientPrecisionLabels = precisionLabelCapacityInsufficient(dataset);
+
         boolean precisionUnmeasured = stage != Stage.FINAL_CONTEXT
-                || missingFor(dataset, missing, Group.ANSWER_CURRENT_HISTORICAL) || !underfilledPrecision.isEmpty();
-        result.add(target("Answer Context Precision@8 >= 85%", precisionUnmeasured
-                ? Decision.UNMEASURED : decision(answerPrecision, .85),
-                precisionUnmeasured ? "Missing output or fewer than 8 results; accepted denominator rule is unspecified"
-                        : "N/A is UNMEASURED, not PASS"));
+                || missingFor(dataset, missing, Group.ANSWER_CURRENT_HISTORICAL)
+                || !underfilledPrecision.isEmpty()
+                || insufficientPrecisionLabels;
+        result.add(target(
+            "Answer Context Precision@8 >= 85%",
+            precisionUnmeasured
+                    ? Decision.UNMEASURED
+                    : decision(answerPrecision, .85),
+            insufficientPrecisionLabels
+                    ? "Insufficient relevant labels to evaluate the 85% target"
+                    : precisionUnmeasured
+                            ? "Missing output or fewer than 8 results; accepted denominator rule is unspecified"
+                            : "N/A is UNMEASURED, not PASS"));
         result.add(new TargetResult("Safety contamination = 0", !safety.isEmpty() ? Decision.FAIL
                 : !missing.isEmpty() ? Decision.UNMEASURED : Decision.PASS,
                 !safety.isEmpty() ? safety.size() + " prohibited-id occurrence(s)"
                         : !missing.isEmpty() ? "Missing scenario outputs" : "Complete scenario coverage"));
-        result.add(new TargetResult("Answer / Relation Candidate Generation p95 <= 300 ms", Decision.UNMEASURED, "No timed production candidate generation"));
+        result.add(candidateGenerationLatencyTarget(latencyMetrics));
         result.add(new TargetResult("Management Search Session Build p95 <= 1,000 ms", Decision.UNMEASURED, "No timed production session build"));
         result.add(new TargetResult("Projection Pending Age p95 <= 5 s; max <= 30 s", Decision.UNMEASURED, "No worker/projection timing input"));
         result.add(new TargetResult("Management candidate-cap failure rate < 1%", Decision.UNMEASURED, "No production search/cap outcome input"));
         return result;
+    }
+
+    private static TargetResult candidateGenerationLatencyTarget(CandidateGenerationLatencyMetrics metrics) {
+        String name = "Answer / Relation Candidate Generation p95 <= 300 ms";
+        if (metrics == null) return new TargetResult(name, Decision.UNMEASURED, "No runtime latency metrics supplied");
+        var answer = metrics.summary(CandidateGenerationLatencyMetrics.Purpose.ANSWER);
+        var relation = metrics.summary(CandidateGenerationLatencyMetrics.Purpose.RELATION);
+        if (answer.decision() == CandidateGenerationLatencyMetrics.Decision.FAIL
+                || relation.decision() == CandidateGenerationLatencyMetrics.Decision.FAIL) {
+            return new TargetResult(name, Decision.FAIL, latencyDetail(answer, relation));
+        }
+        if (answer.decision() != CandidateGenerationLatencyMetrics.Decision.PASS
+                || relation.decision() != CandidateGenerationLatencyMetrics.Decision.PASS) {
+            return new TargetResult(name, Decision.UNMEASURED, latencyDetail(answer, relation));
+        }
+        return new TargetResult(name, Decision.PASS, latencyDetail(answer, relation));
+    }
+
+    private static String latencyDetail(CandidateGenerationLatencyMetrics.Summary answer,
+            CandidateGenerationLatencyMetrics.Summary relation) {
+        return "Answer " + latencyValue(answer) + "; Relation " + latencyValue(relation)
+                + "; each purpose requires " + CandidateGenerationLatencyMetrics.MIN_SAMPLES_FOR_P95 + " samples";
+    }
+
+    private static String latencyValue(CandidateGenerationLatencyMetrics.Summary summary) {
+        return summary.p95Nanos().isPresent()
+                ? "p95=" + (summary.p95Nanos().getAsLong() / 1_000_000.0) + " ms (n=" + summary.sampleCount() + ")"
+                : "UNMEASURED (n=" + summary.sampleCount() + ")";
     }
 
     private static TargetResult target(String name, Decision decision, String reason) { return new TargetResult(name, decision, reason); }
@@ -181,5 +227,37 @@ public final class RankingEvaluationHarness {
     }
     private static List<ScenarioResult> filter(List<ScenarioResult> rows, Group group) {
         return rows.stream().filter(r -> r.group() == group).toList();
+    }
+
+    private static boolean precisionLabelCapacityInsufficient(
+        List<RankingEvaluationDataset.Scenario> dataset) {
+
+        List<RankingEvaluationDataset.Scenario> answerScenarios = dataset.stream()
+                .filter(s ->
+                        s.group() == Group.ANSWER_CURRENT_HISTORICAL)
+                .toList();
+
+        if (answerScenarios.isEmpty()) {
+            return true;
+        }
+
+        long maximumCorrectSlots = 0;
+
+        for (var scenario : answerScenarios) {
+            long relevantCount = scenario.memories().stream()
+                    .filter(f -> f.eligibility()
+                            == RankingEvaluationDataset.Eligibility.ELIGIBLE)
+                    .filter(f -> f.relevance() == Relevance.REQUIRED
+                            || f.relevance() == Relevance.RELATED)
+                    .count();
+
+            maximumCorrectSlots += Math.min(8L, relevantCount);
+        }
+
+        long totalPrecisionSlots = 8L * answerScenarios.size();
+        long requiredCorrectSlots =
+                (long) Math.ceil(0.85 * totalPrecisionSlots);
+
+        return maximumCorrectSlots < requiredCorrectSlots;
     }
 }
